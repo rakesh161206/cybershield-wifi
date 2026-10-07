@@ -1,0 +1,6 @@
+# Root requirements for Vercel's Python runtime.
+# (Local Mac dev uses backend/requirements.txt via `npm run setup`.)
+fastapi>=0.115
+uvicorn>=0.30
+scikit-learn>=1.5
+numpy>=1.26
