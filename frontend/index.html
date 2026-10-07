@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#f4f7fb">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>CyberShield — Zero-Trust Wi-Fi Security</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+body{background:#f4f7fb}
+.card{background:#ffffff;border:1px solid #e3e9f2;box-shadow:0 1px 3px rgba(15,40,70,.06)}
+.mono{font-family:ui-monospace,monospace}
+#radar{touch-action:manipulation}
+button{min-height:40px}
+/* Mobile: turn wide tables into stacked cards */
+@media (max-width:640px){
+  table.rtable thead{display:none}
+  table.rtable, table.rtable tbody, table.rtable tr, table.rtable td{display:block;width:100%}
+  table.rtable tr{border:1px solid #e3e9f2;border-radius:.5rem;margin-bottom:.5rem;padding:.35rem .6rem;background:#ffffff}
+  table.rtable td{border:0!important;padding:.1rem .2rem!important}
+  table.rtable td::before{content:attr(data-l);display:block;font-size:10px;letter-spacing:.05em;color:#94a3b8;text-transform:uppercase}
+  table.rtable td:empty{display:none}
+}
+</style>
+</head>
+<body class="text-slate-800 min-h-screen">
+<div class="w-full px-3 md:px-8 py-4 md:py-6">
+  <header class="mb-4">
+    <h1 class="text-2xl md:text-3xl font-extrabold tracking-tight">🛡️ CYBERSHIELD <span class="text-sky-600">Wi-Fi</span></h1>
+    <p class="text-slate-500 text-sm">Live Zero-Trust Wi-Fi analysis — your real connection, nearby signals, AI verdict</p>
+    <p id="phoneUrl" class="text-sky-600 text-xs mt-1"></p>
+  </header>
+
+  <section class="card rounded p-4 mb-4">
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+      <h2 class="font-bold text-lg">📡 LIVE — Your Real Wi-Fi <span id="liveDot" class="text-xs text-slate-400">checking…</span></h2>
+      <div class="text-sm font-bold"><span id="liveRisk" class="px-2 py-1 rounded">–</span> <span id="liveVerdict" class="ml-2"></span></div>
+    </div>
+    <div id="liveCards" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3"></div>
+    <h3 class="font-bold text-sm mb-1">Protocol checks — is it OK to connect?</h3>
+    <div class="overflow-x-auto mb-3"><table class="w-full text-sm rtable">
+      <thead class="text-slate-500"><tr><th class="text-left p-2">Check</th><th class="text-left p-2">Result</th><th class="text-left p-2">Detail</th></tr></thead>
+      <tbody id="liveChecks"></tbody>
+    </table></div>
+    <div class="grid md:grid-cols-2 gap-3 mb-4 text-sm">
+      <div class="bg-slate-50 border border-slate-200 rounded p-3"><b>Why this score</b><ul id="liveReasons" class="list-disc ml-5 mt-1 text-slate-600"></ul></div>
+      <div class="bg-slate-50 border border-slate-200 rounded p-3"><b>🛡️ What to do</b><ul id="liveRecs" class="list-disc ml-5 mt-1 text-slate-600"></ul></div>
+    </div>
+
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+      <h3 class="font-bold">📡 Signal Radar <span id="radarMeta" class="text-xs font-normal text-slate-500"></span></h3>
+      <div class="flex gap-2 text-xs"><span class="text-green-600">● safe</span><span class="text-yellow-600">● caution</span><span class="text-red-600">● avoid</span></div>
+    </div>
+    <p class="text-xs text-slate-500 mb-2">All nearby signals, positioned by strength · click a blip for verdict + threat analysis · distance is estimated (walls/routers vary)</p>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div><canvas id="radar" class="w-full rounded bg-[#e9f1f9] border border-slate-200" style="aspect-ratio:1"></canvas></div>
+      <div class="min-w-0">
+        <div id="radarList" class="text-sm space-y-1 max-h-52 overflow-y-auto mb-2"></div>
+        <div id="radarDetail" class="text-sm bg-slate-50 border border-slate-200 rounded p-3 max-h-96 overflow-y-auto"><span class="text-slate-400">Select a network ↑</span></div>
+      </div>
+    </div>
+
+    <div class="flex items-center justify-between mb-1">
+      <h3 class="font-bold text-sm">Devices on YOUR network (<span id="lanCount">0</span>)</h3>
+      <button id="btnScan" class="bg-sky-600 hover:bg-sky-500 text-white px-4 py-2 rounded text-sm">Deep scan</button>
+    </div>
+    <div class="overflow-x-auto max-h-56 overflow-y-auto"><table class="w-full text-sm rtable">
+      <thead class="text-slate-500"><tr><th class="text-left p-2">IP</th><th class="text-left p-2">MAC</th><th class="text-left p-2">Hostname</th><th class="text-left p-2"></th></tr></thead>
+      <tbody id="lanRows"></tbody>
+    </table></div>
+    <p id="lanMeta" class="text-xs text-slate-400 mt-1"></p>
+  </section>
+
+  <section class="card rounded p-4 mb-4">
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+      <h2 class="font-bold text-lg">🤖 AI Anomaly Detection <span id="aiDot" class="text-xs text-slate-400">checking…</span></h2>
+      <div class="text-sm font-bold"><span id="aiVerdict" class="px-2 py-1 rounded">–</span></div>
+    </div>
+    <p id="aiDetail" class="text-xs text-slate-500 mb-2"></p>
+    <div class="w-full bg-slate-200 rounded h-2 mb-3"><div id="aiBar" class="h-2 rounded bg-sky-500" style="width:0%"></div></div>
+    <div class="overflow-x-auto"><table class="w-full text-sm rtable">
+      <thead class="text-slate-500"><tr><th class="text-left p-2">Signal</th><th class="text-left p-2">Live value</th><th class="text-left p-2">Normal range</th><th class="text-left p-2">Status</th></tr></thead>
+      <tbody id="aiRows"></tbody>
+    </table></div>
+    <p class="text-xs text-slate-400 mt-2">Isolation Forest trained on normal home-Wi-Fi snapshots. The AI corroborates the rule-based risk above — rule signals stay authoritative.</p>
+  </section>
+
+  <footer class="text-center text-xs text-slate-400 mt-6">
+    Live host-network analysis (macOS) · Authenticate → Authorize → Detect → Respond · Connected ≠ Trusted
+  </footer>
+</div>
+<script>
+const api = (p, o={}) => fetch(p, {headers:{'Content-Type':'application/json'}, ...o}).then(r=>r.json());
+const esc = s => String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const chkIcon = s => s==='pass'?'✅':s==='warn'?'⚠️':'❌';
+const riskColor = l => l==='low'?'background:#dcfce7;color:#166534':l==='caution'?'background:#fef9c3;color:#854d0e':l==='high'?'background:#ffedd5;color:#9a3412':'background:#fee2e2;color:#991b1b';
+
+async function refreshLive(){
+  let s;
+  try{ s = await api('/api/real/status'); }catch(e){ return; }
+  const dot = document.getElementById('liveDot');
+  if(!s.live){ dot.textContent = 'unavailable on this host'; return; }
+  const w = s.wifi, ip = s.ip, r = s.risk;
+  dot.textContent = '● live'; dot.className = 'text-xs text-green-600';
+  document.getElementById('liveRisk').style.cssText = riskColor(r.level);
+  document.getElementById('liveRisk').textContent = `RISK ${r.score}/100`;
+  document.getElementById('liveVerdict').textContent = (r.level==='low'?'🟢 ':r.level==='caution'?'🟡 ':r.level==='high'?'🟠 ':'🔴 ') + r.verdict;
+  const sig = w.signal_dbm!=null ? `${w.signal_dbm} dBm` : 'n/a';
+  document.getElementById('liveCards').innerHTML = [
+    ['Network', w.connected?`📶 <b>${esc(w.ssid)}</b>`:'Not connected'],
+    ['Security', `<b>${esc(w.security||'–')}</b>${w.band?` · ${esc(w.band)}`:''}${w.channel?` · ch ${esc(w.channel)}`:''}`],
+    ['Signal', `<b>${sig}</b>${w.rate_mbps?` · ${w.rate_mbps} Mbps`:''}${w.phy?` · ${esc(w.phy)}`:''}`],
+    ['IP / Gateway', `<span class="mono">${esc(ip.ip||'–')}</span> → <span class="mono">${esc(ip.gateway||'–')}</span>${s.gateway_ms!=null?` · ${s.gateway_ms.toFixed(1)} ms`:''}`],
+  ].map(([k,v])=>`<div class="bg-slate-50 border border-slate-200 rounded p-2"><div class="text-xs text-slate-500">${k}</div><div>${v}</div></div>`).join('');
+  document.getElementById('liveChecks').innerHTML = s.checks.map(c=>
+    `<tr class="border-t border-slate-200"><td class="p-2" data-l="Check">${esc(c.name)}</td><td class="p-2" data-l="Result">${chkIcon(c.status)} ${c.status.toUpperCase()}</td><td class="p-2 text-slate-600" data-l="Detail">${esc(c.detail)}</td></tr>`).join('');
+  document.getElementById('liveReasons').innerHTML = r.reasons.length? r.reasons.map(x=>`<li>${esc(x)}</li>`).join('') : '<li class="list-none">No issues found.</li>';
+  document.getElementById('liveRecs').innerHTML = r.recommendations.map(x=>`<li>${esc(x)}</li>`).join('');
+  if(ip.ip) document.getElementById('phoneUrl').textContent = `📱 Phone view (same Wi-Fi): http://${ip.ip}:8000`;
+}
+
+async function refreshLan(mode='fast', fresh=0){
+  const meta = document.getElementById('lanMeta');
+  meta.textContent = mode==='full' ? 'Scanning subnet… (~10s)' : 'Loading…';
+  try{
+    const r = await api(`/api/real/devices?mode=${mode}&fresh=${fresh}`);
+    document.getElementById('lanCount').textContent = r.devices.length;
+    document.getElementById('lanRows').innerHTML = r.devices.map(d=>
+      `<tr class="border-t border-slate-200"><td class="p-2 mono" data-l="IP">${esc(d.ip)}</td><td class="p-2 mono text-xs" data-l="MAC">${esc(d.mac||'–')}</td>
+       <td class="p-2 text-xs" data-l="Host">${esc(d.hostname||'–')}</td>
+       <td class="p-2 text-xs" data-l="Role">${d.is_self?'💻 you':d.is_gateway?'🌐 router':''}</td></tr>`).join('') || '<tr><td class="p-2 text-slate-400">No devices found.</td></tr>';
+    meta.textContent = `${r.devices.length} device(s) · ${r.mode} scan${r.cached?' · cached':` · ${(r.scan_ms/1000).toFixed(1)}s`}`;
+  }catch(e){ meta.textContent = 'Scan failed.'; }
+}
+document.getElementById('btnScan').onclick = () => refreshLan('full', 1);
+
+// ---------- radar (inline) ----------
+let radarNets = [], radarSel = null, radarRAF = null, radarAngle = 0;
+const vColor = v => v==='connect'?'#16a34a':v==='caution'?'#a16207':'#dc2626';
+const vBadge = v => v==='connect'?'🟢 SAFE TO CONNECT':v==='caution'?'🟡 CAUTION':'🔴 AVOID';
+const hashStr = s => { let h=0; for(const c of String(s)) h=(h*31 + c.codePointAt(0))>>>0; return h; };
+function radarGeom(n, i, R){
+  const sig = n.signal_dbm ?? -90;
+  const frac = Math.max(0.06, Math.min(0.94, (-25 - sig) / 70));
+  const ang = ((i * 137.508) + (hashStr(n.ssid||'') % 360)) * Math.PI/180;
+  return {x: R + R*frac*Math.cos(ang), y: R + R*frac*Math.sin(ang), ang, frac};
+}
+function drawRadar(){
+  const cv = document.getElementById('radar');
+  if(!cv){ return; }
+  if(!radarNets.length){ radarRAF = requestAnimationFrame(drawRadar); return; }
+  const size = cv.clientWidth || 400, dpr = window.devicePixelRatio||1;
+  if(cv.width !== size*dpr){ cv.width = size*dpr; cv.height = size*dpr; }
+  const ctx = cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+  const R = size/2 - 14, cx = size/2, cy = size/2;
+  ctx.clearRect(0,0,size,size);
+  ctx.strokeStyle = '#b9cde3'; ctx.fillStyle = '#64748b'; ctx.font = '10px sans-serif';
+  [[-50,'NEAR'],[-65,'MID'],[-80,'FAR']].forEach(([dbm,label])=>{
+    const f = Math.max(0.06, Math.min(0.94, (-25-dbm)/70));
+    ctx.beginPath(); ctx.arc(cx,cy,R*f,0,7); ctx.stroke();
+    ctx.fillText(`${label} (${dbm})`, cx+4, cy-R*f-3);
+  });
+  ctx.beginPath(); ctx.arc(cx,cy,5,0,7); ctx.fillStyle='#0284c7'; ctx.fill();
+  ctx.fillStyle='#475569'; ctx.fillText('YOU', cx+8, cy+4);
+  const ga = radarAngle*Math.PI/180;
+  ctx.save(); ctx.translate(cx,cy); ctx.rotate(ga);
+  const tg = ctx.createLinearGradient(0,0,R,0); tg.addColorStop(0,'rgba(2,132,199,0)'); tg.addColorStop(1,'rgba(2,132,199,.55)');
+  ctx.strokeStyle = tg; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(R,0); ctx.stroke(); ctx.restore();
+  radarNets.forEach((n,i)=>{
+    const g = radarGeom(n,i,R), x = cx+g.x-R, y = cy+g.y-R;
+    n._x = x; n._y = y;
+    let dA = Math.abs(((radarAngle - g.ang*180/Math.PI)%360+360)%360); dA = Math.min(dA, 360-dA);
+    ctx.globalAlpha = Math.max(0.45, 1 - dA/120);
+    ctx.beginPath(); ctx.arc(x,y, radarSel===n.ssid?8:5.5, 0, 7);
+    ctx.fillStyle = vColor(n.recommendation.verdict); ctx.fill();
+    if(radarSel===n.ssid){ ctx.strokeStyle='#0f172a'; ctx.lineWidth=1.5; ctx.stroke(); }
+    if(n.is_current){ ctx.globalAlpha=1; ctx.beginPath(); ctx.arc(x,y,10,0,7); ctx.strokeStyle='#0284c7'; ctx.stroke(); }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#334155'; ctx.font = '10px sans-serif';
+    ctx.fillText((n.ssid||'hidden').slice(0,14), x+8, y-6);
+  });
+  radarAngle = (radarAngle + 1.6) % 360;
+  radarRAF = requestAnimationFrame(drawRadar);
+}
+function radarDetailHTML(n){
+  const r = n.recommendation;
+  const sevChip = s => s==='high'?'<span class="px-1 rounded" style="background:#fee2e2;color:#991b1b">HIGH</span>':s==='medium'?'<span class="px-1 rounded" style="background:#fef9c3;color:#854d0e">MED</span>':'<span class="px-1 rounded bg-slate-200 text-slate-600">LOW</span>';
+  return `<div class="font-bold text-base mb-1">${esc(n.ssid)||'<i>hidden SSID</i>'} ${n.is_current?'<span class="text-sky-600 text-xs">● yours</span>':''}</div>
+  <div class="mb-2 font-bold" style="color:${vColor(r.verdict)}">${vBadge(r.verdict)}</div>
+  <ul class="list-disc ml-5 mb-2 text-slate-600">${r.reasons.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>
+  <div class="grid grid-cols-2 gap-1 text-xs mb-2 text-slate-600">
+    <div>📶 Signal <b>${n.signal_dbm??'–'} dBm</b></div><div>📍 ${esc(n.proximity.detail)}</div>
+    <div>🔐 ${esc(n.security)}</div><div>📻 Ch ${esc(n.channel)} ${esc(n.band||'')}</div>
+  </div>
+  <b>⚔️ Threat analysis (${n.threats.length})</b>
+  ${n.threats.map(t=>`<div class="bg-white border border-slate-200 rounded p-2 mt-1">
+    <div class="font-bold">${esc(t.name)} ${sevChip(t.severity)}</div>
+    <div class="text-xs text-slate-400 mt-1">HOW IT WORKS</div>
+    <ol class="list-decimal ml-4 text-xs text-slate-600">${t.how.map(h=>`<li>${esc(h)}</li>`).join('')}</ol>
+    <div class="text-xs text-slate-400 mt-1">ATTACKER NEEDS</div>
+    <div class="text-xs">${t.params.map(p=>`<span class="inline-block bg-slate-100 border border-slate-200 rounded px-1 mr-1 mb-1 mono">${esc(p)}</span>`).join('')}</div>
+    <div class="text-xs text-slate-400 mt-1">STAY SAFE</div>
+    <ul class="list-disc ml-4 text-xs text-green-700">${t.defense.map(d=>`<li>${esc(d)}</li>`).join('')}</ul>
+  </div>`).join('')}`;
+}
+async function loadRadar(){
+  try{
+    const r = await api('/api/real/radar');
+    radarNets = r.networks;
+    document.getElementById('radarMeta').textContent = `${r.count} networks · ${r.summary.avoid} avoid / ${r.summary.caution} caution / ${r.summary.connect} safe · ${new Date(r.scanned_at*1000).toLocaleTimeString()}`;
+    if(!radarSel || !radarNets.some(n=>n.ssid===radarSel)) radarSel = (radarNets.find(n=>n.is_current)||radarNets[0])?.ssid;
+    document.getElementById('radarList').innerHTML = radarNets.map(n=>
+      `<button data-ssid="${esc(n.ssid)}" class="rlink w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded px-2 py-1 flex justify-between gap-2">
+       <span><span style="color:${vColor(n.recommendation.verdict)}">●</span> ${esc(n.ssid)||'<i>hidden</i>'}${n.is_current?' <span class="text-sky-600">●</span>':''}</span>
+       <span class="text-slate-500 text-xs">${n.signal_dbm??''} dBm · ${esc(n.security.split(' ')[0])}</span></button>`).join('');
+    document.querySelectorAll('.rlink').forEach(b=>b.onclick=()=>{ radarSel=b.dataset.ssid; renderRadarSel(); });
+    renderRadarSel();
+  }catch(e){ document.getElementById('radarMeta').textContent = 'scan failed'; }
+}
+function renderRadarSel(){
+  const n = radarNets.find(x=>x.ssid===radarSel) || radarNets[0];
+  if(n){ radarSel = n.ssid; document.getElementById('radarDetail').innerHTML = radarDetailHTML(n); }
+}
+document.getElementById('radar').addEventListener('click', ev=>{
+  const cv = ev.currentTarget, rect = cv.getBoundingClientRect();
+  const mx = ev.clientX-rect.left, my = ev.clientY-rect.top;
+  let best=null, bd = ('ontouchstart' in window) ? 34 : 20;
+  radarNets.forEach(n=>{ if(n._x==null) return;
+    const d = Math.hypot(n._x-mx, n._y-my); if(d<bd){bd=d;best=n;} });
+  if(best){ radarSel = best.ssid; renderRadarSel(); }
+});
+
+// ---------- AI ----------
+const AI_LABELS = {nearby_count:'Nearby networks', open_count:'Open networks', lan_devices:'Devices on LAN', gateway_ms:'Gateway latency (ms)', dns_ms:'DNS latency (ms)', signal_dbm:'Signal (dBm)'};
+async function refreshAI(){
+  let d;
+  try{ d = await api('/api/real/ai'); }catch(e){ return; }
+  const dot = document.getElementById('aiDot'), st = d.status, a = d.assessment;
+  if(st.running_properly){
+    dot.textContent = `● RUNNING PROPERLY · ${st.engine} · ${st.baseline_samples}-sample baseline`;
+    dot.className = 'text-xs text-green-600';
+  } else {
+    dot.textContent = `● LIMITED · ${esc(st.detail)}`;
+    dot.className = 'text-xs text-yellow-600';
+  }
+  const v = document.getElementById('aiVerdict');
+  v.textContent = a.anomaly ? `⚠️ ANOMALY ${a.score}` : `✅ NORMAL ${a.score}`;
+  v.style.cssText = a.anomaly ? 'background:#fee2e2;color:#991b1b' : 'background:#dcfce7;color:#166534';
+  document.getElementById('aiBar').style.width = `${Math.round(a.score*100)}%`;
+  document.getElementById('aiBar').className = 'h-2 rounded ' + (a.anomaly?'bg-red-500':'bg-green-500');
+  document.getElementById('aiDetail').textContent = a.detail + (a.outside_features?.length ? ` · outside normal: ${a.outside_features.join(', ')}` : ' · all signals within normal range');
+  document.getElementById('aiRows').innerHTML = Object.keys(d.normal_ranges).map(k=>{
+    const [lo,hi] = d.normal_ranges[k], val = d.snapshot[k];
+    const ok = val!=null && val>=lo && val<=hi;
+    const disp = val==null ? 'n/a' : (k.endsWith('_ms') ? Number(val).toFixed(0) : val);
+    return `<tr class="border-t border-slate-200"><td class="p-2" data-l="Signal">${AI_LABELS[k]}</td><td class="p-2" data-l="Live"><b>${disp}</b></td>
+      <td class="p-2 text-slate-500" data-l="Normal">${lo} – ${hi}</td><td class="p-2" data-l="Status">${ok?'✅ normal':'⚠️ out'}</td></tr>`;
+  }).join('');
+}
+
+refreshLive(); setInterval(refreshLive, 8000);
+refreshLan();
+loadRadar(); setInterval(loadRadar, 12000); drawRadar();
+refreshAI(); setInterval(refreshAI, 10000);
+</script>
+</body>
+</html>

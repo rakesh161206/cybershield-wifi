@@ -1,0 +1,22 @@
+{
+  "name": "cybershield-wifi",
+  "version": "1.0.0",
+  "description": "CyberShield Wi-Fi — AI-Powered Zero-Trust Wi-Fi Security (FastAPI backend + single-HTML dashboard)",
+  "main": "backend/main.py",
+  "scripts": {
+    "setup": "pip install -r backend/requirements.txt",
+    "start": "python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 --app-dir backend",
+    "dev": "python3 -m uvicorn main:app --reload --host 0.0.0.0 --port 8000 --app-dir backend",
+    "health": "node -e \"fetch('http://127.0.0.1:8000/api/stats').then(r=>r.text().then(t=>console.log(r.status,t))).catch(e=>{console.error('DOWN',e.message);process.exit(1)})\""
+  },
+  "keywords": [
+    "wifi",
+    "zero-trust",
+    "cybersecurity",
+    "fastapi"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
