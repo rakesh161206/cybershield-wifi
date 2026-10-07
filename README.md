@@ -27,10 +27,10 @@ uvicorn main:app --reload --port 8000
 ```
 
 ## Demo (2–3 min)
-1. Show dashboard: all 🟢 TRUSTED, trust ~92.
+1. Show dashboard: all TRUSTED, trust ~92.
 2. Click **SIMULATE WI-FI ATTACK** (target DEVICE-007).
 3. Watch timeline: port scan → traffic spike → unknown IP → auth failures → 🍯 decoy touch.
-4. Risk → 90+/100 🔴 CRITICAL → banner `AUTOMATICALLY ISOLATED` + incident with reasons + actions.
+4. Risk → 90+/100  CRITICAL → banner `AUTOMATICALLY ISOLATED` + incident with reasons + actions.
 5. Click Restore, or show manual Isolate.
 
 ## API (simulated Zero-Trust demo)- `GET /api/devices /api/stats /api/events /api/incidents /api/decoys`
@@ -52,5 +52,3 @@ auth_failures>5 +20 · unknown_dest +20 · port_scan +30 · traffic_spike +15 ·
 ## AI
 IsolationForest on [connections, unique_dests, port_attempts, request_freq, traffic]. Falls back to rules if sklearn missing. Decoy signal always counts (high confidence even if ML misses).
 
-## Honest note for judges
-> "Our prototype simulates Wi-Fi device telemetry and network events. The same security engine can later be connected to real AP/controller logs for enforcement."
