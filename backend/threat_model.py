@@ -9,7 +9,10 @@ For each visible Wi-Fi network we produce:
                    level, what parameters an attacker would need, how to
                    stay safe). No operational tooling/commands.
 """
-from real_net import PUBLIC_HINTS
+try:
+    from backend.real_net import PUBLIC_HINTS
+except ImportError:
+    from real_net import PUBLIC_HINTS
 
 # ---------------- threat catalog (defensive awareness) ----------------
 OPEN_THREATS = [

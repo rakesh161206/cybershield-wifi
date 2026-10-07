@@ -8,14 +8,16 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from risk_engine import calculate_risk, trust_from_risk, AUTO_ISOLATE_THRESHOLD
-from ai_detector import ai_score
-import ai_detector
-import database as db
-import real_net
-import threat_model
-from simulator import NORMAL_DEVICES, DECOYS, ALLOW_LIST, DENY_LIST, fresh_device_state, attack_sequence
+from backend.risk_engine import calculate_risk, trust_from_risk, AUTO_ISOLATE_THRESHOLD
+from backend.ai_detector import ai_score
+from backend import ai_detector
+from backend import database as db
+from backend import real_net
+from backend import threat_model
+from backend.simulator import NORMAL_DEVICES, DECOYS, ALLOW_LIST, DENY_LIST, fresh_device_state, attack_sequence
 
 app = FastAPI(title="CyberShield Wi-Fi")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])

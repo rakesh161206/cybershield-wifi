@@ -3,7 +3,8 @@ import sqlite3
 import os
 from datetime import datetime, timezone
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "cybershield.db")
+_DB_DIR = "/tmp" if os.environ.get("VERCEL") else os.path.dirname(__file__)
+DB_PATH = os.path.join(_DB_DIR, "cybershield.db")
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()

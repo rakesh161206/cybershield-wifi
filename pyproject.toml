@@ -1,0 +1,12 @@
+[project]
+name = "cybershield-wifi"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "scikit-learn>=1.5",
+    "numpy>=1.26",
+]
+
+[tool.vercel]
+entrypoint = "backend.main:app"
