@@ -18,6 +18,7 @@ from backend import database as db
 from backend import real_net
 from backend import threat_model
 from backend import policy
+from backend import attacker
 from backend.simulator import NORMAL_DEVICES, DECOYS, ALLOW_LIST, DENY_LIST, fresh_device_state, attack_sequence
 
 app = FastAPI(title="CyberShield Wi-Fi")
@@ -217,7 +218,11 @@ def real_radar():
     import time
     st = real_net.full_status()
     ssid = (st.get("wifi") or {}).get("ssid", "")
-    nets = threat_model.assess(real_net.get_nearby(ssid))
+    nearby = real_net.get_nearby(ssid)
+    twin = attacker.virtual_network(nearby)
+    if twin:
+        nearby = nearby + [twin]
+    nets = threat_model.assess(nearby)
     pending = policy.evaluate_pending(nets)
     # refresh blocked flags after enforcement
     for n in nets:
@@ -236,6 +241,9 @@ class FlagReq(BaseModel):
     ip: str = ""
     mac: str = ""
     note: str = "flagged by admin"
+
+class AttackReq2(BaseModel):
+    target_ssid: str = ""
 
 @app.post("/api/real/block")
 def block_network(req: SsidReq):
@@ -269,6 +277,30 @@ def disconnect_now():
 @app.get("/api/policy")
 def get_policy():
     return policy.policy_status()
+
+@app.get("/api/demo/attack")
+def demo_status():
+    return attacker.status()
+
+@app.post("/api/demo/attack/start")
+def demo_start(req: AttackReq2):
+    st = real_net.full_status()
+    target = req.target_ssid or (st.get("wifi") or {}).get("ssid", "")
+    s = attacker.start(target)
+    db.log_event("DEMO", "attack-start",
+                 f"Virtual attacker {attacker.PROFILE['id']} targeting “{target}” (simulated)", 0)
+    return s
+
+@app.post("/api/demo/attack/stop")
+def demo_stop():
+    twin = attacker.status()
+    target = twin.get("target", "")
+    s = attacker.stop("blocked")
+    db.add_incident("DEMO", 95, "Evil twin neutralized by admin",
+                    f"Twin of “{target}” blocked — scenario contained (simulated)")
+    db.log_event("DEMO", "attack-stop",
+                 f"Twin of “{target}” blocked by admin — threat neutralized (simulated)", 0)
+    return s
 
 @app.post("/api/real/device/flag")
 def flag_device(req: FlagReq):
