@@ -17,6 +17,7 @@ from backend import ai_detector
 from backend import database as db
 from backend import real_net
 from backend import threat_model
+from backend import policy
 from backend.simulator import NORMAL_DEVICES, DECOYS, ALLOW_LIST, DENY_LIST, fresh_device_state, attack_sequence
 
 app = FastAPI(title="CyberShield Wi-Fi")
@@ -212,21 +213,80 @@ def real_networks():
 
 @app.get("/api/real/radar")
 def real_radar():
-    """Nearby networks + proximity + connect verdict + threat model."""
+    """Nearby networks + score + verdict + threats. Threats wait for your decision."""
     import time
     st = real_net.full_status()
     ssid = (st.get("wifi") or {}).get("ssid", "")
     nets = threat_model.assess(real_net.get_nearby(ssid))
+    pending = policy.evaluate_pending(nets)
+    # refresh blocked flags after enforcement
+    for n in nets:
+        n["blocked"] = db.is_blocked(n.get("ssid") or "")
     counts = {"connect": 0, "caution": 0, "avoid": 0}
     for n in nets:
         counts[n["recommendation"]["verdict"]] += 1
     return {"scanned_at": time.time(), "count": len(nets),
-            "current_ssid": ssid, "summary": counts, "networks": nets}
+            "current_ssid": ssid, "summary": counts, "networks": nets,
+            "pending_blocks": pending, "policy": policy.policy_status()}
+
+class SsidReq(BaseModel):
+    ssid: str = ""
+
+class FlagReq(BaseModel):
+    ip: str = ""
+    mac: str = ""
+    note: str = "flagged by admin"
+
+@app.post("/api/real/block")
+def block_network(req: SsidReq):
+    if not req.ssid:
+        return {"error": "ssid required"}
+    ok, detail = policy.forget_network(req.ssid)
+    nets = threat_model.assess(real_net.get_nearby(""))
+    rec = next((n["recommendation"] for n in nets if n.get("ssid") == req.ssid),
+               {"score": 0, "reasons": ["manual block"]})
+    db.block(req.ssid, "; ".join(rec.get("reasons", [])), auto=0)
+    msg = f"BLOCKED “{req.ssid}” (risk {rec.get('score', '?')}/100): {detail}"
+    db.add_incident("ADMIN", rec.get("score", 0) if isinstance(rec.get("score"), int) else 0,
+                    "; ".join(rec.get("reasons", [])), msg)
+    db.log_event("ADMIN", "block", msg, 0)
+    return {"ok": True, "forgotten": ok, "detail": detail}
+
+@app.post("/api/real/unblock")
+def unblock_network(req: SsidReq):
+    if not req.ssid:
+        return {"error": "ssid required"}
+    db.unblock(req.ssid)
+    db.log_event("ADMIN", "allow", f"✅ “{req.ssid}” allowlisted — auto-protect will not touch it", 0)
+    return {"ok": True}
+
+@app.post("/api/real/disconnect")
+def disconnect_now():
+    ok, detail = policy.disconnect_wifi()
+    db.log_event("ADMIN", "disconnect", f"Wi-Fi turned off by admin ({detail})", 0)
+    return {"ok": ok, "detail": detail}
+
+@app.get("/api/policy")
+def get_policy():
+    return policy.policy_status()
+
+@app.post("/api/real/device/flag")
+def flag_device(req: FlagReq):
+    if not req.ip:
+        return {"error": "ip required"}
+    db.flag_device(req.ip, req.mac, req.note)
+    db.log_event(req.ip, "flag", f"🚩 device {req.ip} ({req.mac}) flagged: {req.note}", 0)
+    return {"ok": True, "note": "Flagged in CyberShield. To truly isolate it, block its MAC on your router."}
 
 @app.get("/api/real/devices")
 def real_devices(fresh: int = 0, mode: str = "fast"):
     mode = mode if mode in ("fast", "full") else "fast"
-    return real_net.get_lan_devices(mode=mode, fresh=bool(fresh))
+    r = real_net.get_lan_devices(mode=mode, fresh=bool(fresh))
+    flagged = {f["ip"] for f in db.get_flagged()}
+    for d in r.get("devices", []):
+        d["flagged"] = d["ip"] in flagged
+    r["gateway"] = real_net.get_ip_info().get("gateway", "")
+    return r
 
 @app.post("/api/real/scan")
 def real_scan():

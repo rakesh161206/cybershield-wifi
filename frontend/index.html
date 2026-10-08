@@ -36,7 +36,7 @@ button{min-height:40px}
   <section class="card rounded p-4 mb-4">
     <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
       <h2 class="font-bold text-lg">📡 LIVE — Your Real Wi-Fi <span id="liveDot" class="text-xs text-slate-400">checking…</span></h2>
-      <div class="text-sm font-bold"><span id="liveRisk" class="px-2 py-1 rounded">–</span> <span id="liveVerdict" class="ml-2"></span></div>
+      <div class="text-sm font-bold flex items-center gap-2"><span id="liveRisk" class="px-2 py-1 rounded">–</span> <span id="liveVerdict" class="ml-2"></span><button id="btnDisconnect" title="Emergency: turn Wi-Fi off" class="bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded text-xs font-bold">Disconnect Wi-Fi</button></div>
     </div>
     <div id="liveCards" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3"></div>
     <h3 class="font-bold text-sm mb-1">Protocol checks — is it OK to connect?</h3>
@@ -54,6 +54,7 @@ button{min-height:40px}
       <div class="flex gap-2 text-xs"><span class="text-green-600">● safe</span><span class="text-yellow-600">● caution</span><span class="text-red-600">● avoid</span></div>
     </div>
     <p class="text-xs text-slate-500 mb-2">All nearby signals, positioned by strength · click a blip for verdict + threat analysis · distance is estimated (walls/routers vary)</p>
+    <div id="policyBanner" class="hidden"></div>
     <div class="grid md:grid-cols-2 gap-4 mb-4">
       <div><canvas id="radar" class="w-full rounded bg-[#e9f1f9] border border-slate-200" style="aspect-ratio:1"></canvas></div>
       <div class="min-w-0">
@@ -67,7 +68,7 @@ button{min-height:40px}
       <button id="btnScan" class="bg-sky-600 hover:bg-sky-500 text-white px-4 py-2 rounded text-sm">Deep scan</button>
     </div>
     <div class="overflow-x-auto max-h-56 overflow-y-auto"><table class="w-full text-sm rtable">
-      <thead class="text-slate-500"><tr><th class="text-left p-2">IP</th><th class="text-left p-2">MAC</th><th class="text-left p-2">Hostname</th><th class="text-left p-2"></th></tr></thead>
+      <thead class="text-slate-500"><tr><th class="text-left p-2">IP</th><th class="text-left p-2">MAC</th><th class="text-left p-2">Hostname</th><th class="text-left p-2"></th><th class="text-left p-2">Action</th></tr></thead>
       <tbody id="lanRows"></tbody>
     </table></div>
     <p id="lanMeta" class="text-xs text-slate-400 mt-1"></p>
@@ -130,11 +131,17 @@ async function refreshLan(mode='fast', fresh=0){
     document.getElementById('lanRows').innerHTML = r.devices.map(d=>
       `<tr class="border-t border-slate-200"><td class="p-2 mono" data-l="IP">${esc(d.ip)}</td><td class="p-2 mono text-xs" data-l="MAC">${esc(d.mac||'–')}</td>
        <td class="p-2 text-xs" data-l="Host">${esc(d.hostname||'–')}</td>
-       <td class="p-2 text-xs" data-l="Role">${d.is_self?'💻 you':d.is_gateway?'🌐 router':''}</td></tr>`).join('') || '<tr><td class="p-2 text-slate-400">No devices found.</td></tr>';
-    meta.textContent = `${r.devices.length} device(s) · ${r.mode} scan${r.cached?' · cached':` · ${(r.scan_ms/1000).toFixed(1)}s`}`;
+       <td class="p-2 text-xs" data-l="Role">${d.is_self?'💻 you':d.is_gateway?'🌐 router':''}</td>
+       <td class="p-2 text-xs" data-l="Act">${d.flagged?'🚩 flagged':(!d.is_self&&!d.is_gateway?`<button data-flag="${esc(d.ip)}" data-mac="${esc(d.mac||'')}" class="bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded text-xs font-bold">Flag</button>`:'')}</td></tr>`).join('') || '<tr><td class="p-2 text-slate-400">No devices found.</td></tr>';
+    meta.textContent = `${r.devices.length} device(s) · ${r.mode} scan${r.cached?' · cached':` · ${(r.scan_ms/1000).toFixed(1)}s`}${r.gateway?` · true isolation needs a MAC block on your router at ${r.gateway}`:''}`;
   }catch(e){ meta.textContent = 'Scan failed.'; }
 }
 document.getElementById('btnScan').onclick = () => refreshLan('full', 1);
+document.getElementById('btnDisconnect').onclick = async () => {
+  if(!confirm('Turn Wi-Fi OFF on this Mac? (manual emergency action — auto-protect never does this by itself)')) return;
+  await api('/api/real/disconnect',{method:'POST'});
+  refreshLive();
+};
 
 // ---------- radar (inline) ----------
 let radarNets = [], radarSel = null, radarRAF = null, radarAngle = 0;
@@ -189,6 +196,16 @@ function radarDetailHTML(n){
   const sevChip = s => s==='high'?'<span class="px-1 rounded" style="background:#fee2e2;color:#991b1b">HIGH</span>':s==='medium'?'<span class="px-1 rounded" style="background:#fef9c3;color:#854d0e">MED</span>':'<span class="px-1 rounded bg-slate-200 text-slate-600">LOW</span>';
   return `<div class="font-bold text-base mb-1">${esc(n.ssid)||'<i>hidden SSID</i>'} ${n.is_current?'<span class="text-sky-600 text-xs">● yours</span>':''}</div>
   <div class="mb-2 font-bold" style="color:${vColor(r.verdict)}">${vBadge(r.verdict)}</div>
+  <div class="flex items-center gap-2 mb-1 text-sm"><b>RISK ${n.score ?? '?'}/100</b>
+    <div class="flex-1 bg-slate-200 rounded h-2"><div class="h-2 rounded" style="width:${n.score ?? 0}%;background:${vColor(r.verdict)}"></div></div>
+  </div>
+  <div class="flex flex-wrap items-center gap-2 mb-2 text-xs">
+    ${n.blocked
+      ? `<span class="px-2 py-1 rounded font-bold" style="background:#fee2e2;color:#991b1b">BLOCKED — won't auto-join</span><button data-unblock="${esc(n.ssid)}" class="bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded font-bold">Unblock (allow)</button>`
+      : `<button data-block="${esc(n.ssid)}" class="bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-bold">Block this network</button>`}
+    ${n.preferred && !n.blocked ? '<span class="text-slate-500">· in preferred list (auto-joins)</span>' : ''}
+    ${n.is_current ? '<span class="text-slate-500">· connected right now</span>' : ''}
+  </div>
   <ul class="list-disc ml-5 mb-2 text-slate-600">${r.reasons.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>
   <div class="grid grid-cols-2 gap-1 text-xs mb-2 text-slate-600">
     <div>📶 Signal <b>${n.signal_dbm??'–'} dBm</b></div><div>📍 ${esc(n.proximity.detail)}</div>
@@ -213,18 +230,46 @@ async function loadRadar(){
     if(!radarSel || !radarNets.some(n=>n.ssid===radarSel)) radarSel = (radarNets.find(n=>n.is_current)||radarNets[0])?.ssid;
     document.getElementById('radarList').innerHTML = radarNets.map(n=>
       `<button data-ssid="${esc(n.ssid)}" class="rlink w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded px-2 py-1 flex justify-between gap-2">
-       <span><span style="color:${vColor(n.recommendation.verdict)}">●</span> ${esc(n.ssid)||'<i>hidden</i>'}${n.is_current?' <span class="text-sky-600">●</span>':''}</span>
-       <span class="text-slate-500 text-xs">${n.signal_dbm??''} dBm · ${esc(n.security.split(' ')[0])}</span></button>`).join('');
+       <span><span style="color:${vColor(n.recommendation.verdict)}">●</span> ${esc(n.ssid)||'<i>hidden</i>'}${n.is_current?' <span class="text-sky-600">●</span>':''}${n.blocked?' <span class="text-red-600 font-bold">BLOCKED</span>':''}</span>
+       <span class="text-slate-500 text-xs">${n.score}/100 · ${n.signal_dbm??''} dBm</span></button>`).join('');
     document.querySelectorAll('.rlink').forEach(b=>b.onclick=()=>{ radarSel=b.dataset.ssid; renderRadarSel(); });
     renderRadarSel();
+    const pb = document.getElementById('policyBanner');
+    const pend = r.pending_blocks || [];
+    const blocked = (r.policy && r.policy.blocked) || [];
+    pb.innerHTML = pend.map(a=>`<div class="flex flex-wrap items-center gap-2">⚠️ <b>${esc(a.ssid)}</b> (risk ${a.score}/100) — block it?
+      <button data-block="${esc(a.ssid)}" class="bg-red-600 hover:bg-red-500 text-white px-2 py-1 rounded font-bold">Block</button>
+      <button data-unblock="${esc(a.ssid)}" class="bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded font-bold">Allow</button></div>
+      <div class="text-slate-500 ml-5 mb-1">${esc((a.reasons || []).join(' · '))}${a.preferred ? ' · <i>in your preferred list (auto-joins)</i>' : ''}</div>`).join('')
+      + (blocked.length ? `<div class="mt-1 text-slate-600">Blocklist (${blocked.length}): ${blocked.map(x=>`${esc(x.ssid)}${x.auto ? ' <i>auto</i>' : ''}`).join(' · ')}</div>` : '');
+    pb.className = (pend.length || blocked.length) ? 'text-xs mb-2 p-2 rounded border border-yellow-200 bg-yellow-50' : 'hidden';
   }catch(e){ document.getElementById('radarMeta').textContent = 'scan failed'; }
 }
 function renderRadarSel(){
   const n = radarNets.find(x=>x.ssid===radarSel) || radarNets[0];
   if(n){ radarSel = n.ssid; document.getElementById('radarDetail').innerHTML = radarDetailHTML(n); }
 }
-document.getElementById('radar').addEventListener('click', ev=>{
-  const cv = ev.currentTarget, rect = cv.getBoundingClientRect();
+// block / unblock / flag actions (buttons are rendered dynamically)
+document.addEventListener('click', async ev=>{
+  const b = ev.target.closest('[data-block],[data-unblock],[data-flag]');
+  if(!b) return;
+  if(b.dataset.block){
+    if(!confirm(`Block "${b.dataset.block}"? Your Mac will forget it and won't auto-join it again.`)) return;
+    b.textContent = 'Blocking…';
+    await api('/api/real/block',{method:'POST',body:JSON.stringify({ssid:b.dataset.block})});
+    loadRadar();
+  }
+  if(b.dataset.unblock){
+    await api('/api/real/unblock',{method:'POST',body:JSON.stringify({ssid:b.dataset.unblock})});
+    loadRadar();
+  }
+  if(b.dataset.flag){
+    b.textContent = 'Flagging…';
+    await api('/api/real/device/flag',{method:'POST',body:JSON.stringify({ip:b.dataset.flag,mac:b.dataset.mac||'',note:'flagged from dashboard'})});
+    refreshLan();
+  }
+});
+document.getElementById('radar').addEventListener('click', ev=>{  const cv = ev.currentTarget, rect = cv.getBoundingClientRect();
   const mx = ev.clientX-rect.left, my = ev.clientY-rect.top;
   let best=null, bd = ('ontouchstart' in window) ? 34 : 20;
   radarNets.forEach(n=>{ if(n._x==null) return;

@@ -45,6 +45,15 @@ uvicorn main:app --reload --port 8000
 - `GET /api/real/devices?mode=fast` — devices on your LAN via ARP (instant)
 - `POST /api/real/scan` — deep ping-sweep of your /24 (~10s)
 - `GET /api/real/radar` — nearby networks + proximity zone + connect verdict + threat model (powers the 📡 WI-FI RADAR popup)
+- `POST /api/real/block {"ssid":"..."}` — forget network (no auto-join) + blocklist it
+- `POST /api/real/unblock {"ssid":"..."}` — allowlist it (auto-protect won't touch it again)
+- `POST /api/real/disconnect` — turn Wi-Fi off (manual emergency only)
+- `POST /api/real/device/flag {"ip":"...","mac":"..."}` — flag a LAN device (true isolation needs a MAC block on the router)
+- `GET /api/policy` — auto-protect state + block/allow/flag lists
+
+Protection is ask-first: every radar scan lists `avoid` networks
+(score ≥65) with Block / Allow buttons — nothing is forgotten
+until you confirm it.
 
 ## Risk engine
 auth_failures>5 +20 · unknown_dest +20 · port_scan +30 · traffic_spike +15 · request_anomaly +15 · decoy_hit +40 · unauthorized +20. Cap 100. 0–30 trusted, 31–60 suspicious, 61–80 high, 81–100 critical. Auto-isolate >80.

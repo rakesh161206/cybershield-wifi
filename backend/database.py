@@ -36,6 +36,15 @@ def init_db():
     cur.execute("""CREATE TABLE IF NOT EXISTS decoy_hits(
         id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, device_id TEXT, decoy_id TEXT
     )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS blocked(
+        ssid TEXT PRIMARY KEY, reason TEXT, auto INTEGER, ts TEXT
+    )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS allowed(
+        ssid TEXT PRIMARY KEY, ts TEXT
+    )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS flagged_devices(
+        ip TEXT PRIMARY KEY, mac TEXT, note TEXT, ts TEXT
+    )""")
     c.commit()
     c.close()
 
@@ -112,3 +121,70 @@ def clear_dynamic():
     c.execute("DELETE FROM decoy_hits")
     c.commit()
     c.close()
+
+# ---- Zero-Trust block / allow / flag lists ----
+def block(ssid: str, reason: str, auto: int = 0):
+    c = conn()
+    c.execute("INSERT INTO blocked(ssid,reason,auto,ts) VALUES(?,?,?,?) "
+              "ON CONFLICT(ssid) DO UPDATE SET reason=excluded.reason,auto=excluded.auto,ts=excluded.ts",
+              (ssid, reason, int(auto), now_iso()))
+    c.commit()
+    c.close()
+
+def unblock(ssid: str):
+    c = conn()
+    c.execute("DELETE FROM blocked WHERE ssid=?", (ssid,))
+    c.execute("INSERT INTO allowed(ssid,ts) VALUES(?,?) "
+              "ON CONFLICT(ssid) DO UPDATE SET ts=excluded.ts", (ssid, now_iso()))
+    c.commit()
+    c.close()
+
+def remove_allowed(ssid: str):
+    c = conn()
+    c.execute("DELETE FROM allowed WHERE ssid=?", (ssid,))
+    c.commit()
+    c.close()
+
+def is_blocked(ssid: str) -> bool:
+    c = conn()
+    r = c.execute("SELECT 1 FROM blocked WHERE ssid=?", (ssid,)).fetchone()
+    c.close()
+    return bool(r)
+
+def is_auto(ssid: str) -> bool:
+    c = conn()
+    r = c.execute("SELECT auto FROM blocked WHERE ssid=?", (ssid,)).fetchone()
+    c.close()
+    return bool(r and r[0])
+
+def is_allowed(ssid: str) -> bool:
+    c = conn()
+    r = c.execute("SELECT 1 FROM allowed WHERE ssid=?", (ssid,)).fetchone()
+    c.close()
+    return bool(r)
+
+def get_blocked():
+    c = conn()
+    rows = c.execute("SELECT * FROM blocked ORDER BY ts DESC").fetchall()
+    c.close()
+    return [dict(r) for r in rows]
+
+def get_allowed():
+    c = conn()
+    rows = c.execute("SELECT ssid FROM allowed").fetchall()
+    c.close()
+    return [r[0] for r in rows]
+
+def flag_device(ip: str, mac: str, note: str):
+    c = conn()
+    c.execute("INSERT INTO flagged_devices(ip,mac,note,ts) VALUES(?,?,?,?) "
+              "ON CONFLICT(ip) DO UPDATE SET mac=excluded.mac,note=excluded.note,ts=excluded.ts",
+              (ip, mac, note, now_iso()))
+    c.commit()
+    c.close()
+
+def get_flagged():
+    c = conn()
+    rows = c.execute("SELECT * FROM flagged_devices").fetchall()
+    c.close()
+    return [dict(r) for r in rows]

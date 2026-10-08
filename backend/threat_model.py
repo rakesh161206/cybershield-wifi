@@ -122,44 +122,18 @@ def proximity(dbm) -> dict:
     return {"zone": "edge of range", "detail": f"{dbm} dBm — barely reachable"}
 
 
+import policy
+import database as db
+
+
 def recommend(net: dict, ssid_variants: dict) -> dict:
-    """verdict: connect | caution | avoid"""
-    sec = _sec_class(net.get("security", ""))
-    ssid = (net.get("ssid") or "")
-    low = ssid.lower()
-    reasons = []
-    cls = sec
-    if cls == "open":
-        verdict = "avoid"
-        reasons.append("No encryption — anyone nearby can read unencrypted traffic")
-    elif cls == "wep":
-        verdict = "avoid"
-        reasons.append("WEP encryption is broken and quickly recoverable")
-    elif cls == "wpa":
-        verdict = "avoid"
-        reasons.append("WPA (v1) is outdated with known weaknesses")
-    elif cls == "wpa3":
-        verdict = "connect"
-        reasons.append("Strong WPA3 encryption")
-    elif cls == "wpa2":
-        verdict = "connect"
-        reasons.append("Good WPA2 encryption")
-    else:
-        verdict = "caution"
-        reasons.append("Encryption type could not be verified")
-    if verdict == "connect":
-        if any(h in low for h in PUBLIC_HINTS):
-            verdict = "caution"
-            reasons.append("Looks like a public/shared hotspot — verify the exact name")
-        variants = ssid_variants.get(ssid, set())
-        if len(variants) > 1:
-            verdict = "caution"
-            reasons.append("Same name seen with different settings — possible twin, verify with owner")
-        if (net.get("signal_dbm") or 0) < -78:
-            reasons.append("Very weak signal — connection may be unstable")
+    """verdict: connect | caution | avoid (+ numeric score 0-100)."""
+    low = (net.get("ssid") or "").lower()
+    public_hint = any(h in low for h in PUBLIC_HINTS)
+    score, verdict, reasons = policy.score_network(net, ssid_variants, public_hint)
     if net.get("is_current") and verdict == "connect":
-        reasons.append("This is the network you are on now")
-    return {"verdict": verdict, "reasons": reasons}
+        reasons = reasons + ["This is the network you are on now"]
+    return {"verdict": verdict, "score": score, "reasons": reasons}
 
 
 def assess(networks: list) -> list:
@@ -168,11 +142,21 @@ def assess(networks: list) -> list:
         if n.get("ssid"):
             variants.setdefault(n["ssid"], set()).add(
                 (n.get("channel", ""), n.get("security", "")))
+    try:
+        preferred = set(policy.preferred_networks())
+    except Exception:
+        preferred = set()
     out = []
     for n in networks:
         cls = _sec_class(n.get("security", ""))
+        rec = recommend(n, variants)
+        ssid = n.get("ssid") or ""
         out.append({**n,
+                    "score": rec["score"],
                     "proximity": proximity(n.get("signal_dbm")),
-                    "recommendation": recommend(n, variants),
-                    "threats": CATALOG[cls]})
+                    "recommendation": rec,
+                    "threats": CATALOG[cls],
+                    "preferred": ssid in preferred,
+                    "blocked": db.is_blocked(ssid),
+                    "allowed": db.is_allowed(ssid)})
     return out
