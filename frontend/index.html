@@ -34,9 +34,17 @@ button{min-height:40px}
   </header>
 
   <section class="card rounded p-4 mb-4">
-    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-      <h2 class="font-bold text-lg">📡 LIVE — Your Real Wi-Fi <span id="liveDot" class="text-xs text-slate-400">checking…</span></h2>
+    <div class="flex flex-wrap items-start justify-between gap-2 mb-3">
+      <h2 class="font-bold text-lg">📡 LIVE — Your Real Wi-Fi <span id="liveDot" class="text-xs text-slate-500">checking…</span></h2>
+      <div class="flex flex-col items-end gap-2">
+        <div class="flex gap-2 text-sm text-center">
+          <div class="bg-slate-50 border border-slate-200 rounded px-2 py-1 min-w-[4.5rem]"><div class="text-[10px] text-slate-400">SPEED ↓</div><div class="font-bold" id="stSpeed">–</div></div>
+          <div class="bg-slate-50 border border-slate-200 rounded px-2 py-1 min-w-[4.5rem]"><div class="text-[10px] text-slate-400">PING</div><div class="font-bold" id="stPing">–</div></div>
+          <div class="bg-slate-50 border border-slate-200 rounded px-2 py-1 min-w-[4.5rem]"><div class="text-[10px] text-slate-400">ONLINE</div><div class="font-bold" id="stUp">–</div></div>
+          <button id="btnSpeed" title="Re-test internet speed (~10s)" class="bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded text-xs font-bold">↻</button>
+        </div>
       <div class="text-sm font-bold flex items-center gap-2"><span id="liveRisk" class="px-2 py-1 rounded">–</span> <span id="liveVerdict" class="ml-2"></span><button id="btnDisconnect" title="Emergency: turn Wi-Fi off" class="bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded text-xs font-bold">Disconnect Wi-Fi</button><button id="btnDemoAttack" title="Stage demo: virtual evil-twin attacker (simulated)" class="bg-red-600 hover:bg-red-500 text-white px-2 py-1 rounded text-xs font-bold">🎭 Simulate attack</button></div>
+      </div>
     </div>
     <div id="liveCards" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3"></div>
     <h3 class="font-bold text-sm mb-1">Selected network — click any radar blip or list row</h3>
@@ -353,11 +361,32 @@ async function refreshAI(){
   }).join('');
 }
 
+// ---------- link vitals (top-right tiles) ----------
+const fmtDur = s => { if(s==null) return '–'; s=Math.floor(s); const h=Math.floor(s/3600), m=Math.floor(s%3600/60); return h?`${h}h ${m}m`:`${m}m`; };
+async function refreshLink(){
+  let d;
+  try{ d = await api('/api/real/link'); }catch(e){ return; }
+  document.getElementById('stSpeed').textContent = d.speed_mbps!=null ? d.speed_mbps + ' Mbps' : '–';
+  const parts = [];
+  if(d.gateway_ms!=null) parts.push(`GW ${d.gateway_ms.toFixed(0)}ms`);
+  if(d.internet_ms!=null) parts.push(`${d.internet_ms.toFixed(0)}ms`);
+  document.getElementById('stPing').textContent = parts.join(' · ') || (d.internet_ok ? 'ok' : '–');
+  document.getElementById('stUp').textContent = fmtDur(d.connected_for_s);
+}
+document.getElementById('btnSpeed').onclick = async ev => {
+  const b = ev.currentTarget; b.textContent='…'; b.disabled=true;
+  document.getElementById('stSpeed').textContent = 'testing…';
+  await api('/api/real/speedtest',{method:'POST'});
+  await refreshLink(); b.textContent='↻'; b.disabled=false;
+};
+
 refreshLive(); setInterval(refreshLive, 8000);
 refreshLan();
 loadRadar(); setInterval(loadRadar, 12000); drawRadar();
 refreshAI(); setInterval(refreshAI, 10000);
 refreshDemo(); setInterval(refreshDemo, 4000);
+refreshLink(); setInterval(refreshLink, 20000);
+setTimeout(async ()=>{ await api('/api/real/speedtest',{method:'POST'}); refreshLink(); }, 3000);
 </script>
 </body>
 </html>

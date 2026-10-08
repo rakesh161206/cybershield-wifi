@@ -199,6 +199,67 @@ def check_internet(timeout=4) -> dict:
         return {"reachable": False, "latency_ms": None, "method": f"unreachable ({e.__class__.__name__})"}
 
 
+# ---------- link vitals: lease (connection time) + speed ----------
+def get_lease_start() -> float | None:
+    """Epoch of DHCP lease start ≈ time this connection came up."""
+    out = _run(["ipconfig", "getsummary", "en0"], timeout=5)
+    m = re.search(r"LeaseStartTime\s*:\s*(\d{1,2})/(\d{1,2})/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})", out)
+    if not m:
+        return None
+    try:
+        a, b, y, hh, mm, ss = map(int, m.groups())
+        # disambiguate d/m vs m/d: month can never exceed 12
+        mon, day = (b, a) if a > 12 else (a, b)
+        from datetime import datetime
+        return datetime(y, mon, day, hh, mm, ss).timestamp()
+    except Exception:
+        return None
+
+
+_speed_cache = {"ts": 0, "mbps": None}
+
+
+def speed_test(mb: int = 10, timeout: int = 30) -> float | None:
+    """Download N MB from Cloudflare edge, return Mbps. Cached result served by link()."""
+    global _speed_cache
+    url = f"https://speed.cloudflare.com/__down?bytes={mb * 1000 * 1000}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "CyberShield"})
+        t0 = time.time()
+        total = 0
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            while True:
+                chunk = r.read(256 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if time.time() - t0 > timeout:
+                    break
+        dt = time.time() - t0
+        if dt <= 0 or total == 0:
+            return None
+        mbps = round((total * 8) / dt / 1_000_000, 1)
+        _speed_cache = {"ts": time.time(), "mbps": mbps}
+        return mbps
+    except Exception:
+        return None
+
+
+def link_stats() -> dict:
+    """Cheap snapshot for the header tiles (no speed download)."""
+    info = get_ip_info()
+    gw = ping_avg(info["gateway"]) if info.get("gateway") else None
+    dns = check_dns_time()
+    net = check_internet()
+    lease = get_lease_start()
+    return {"speed_mbps": _speed_cache["mbps"], "speed_at": _speed_cache["ts"],
+            "gateway_ms": gw, "dns_ms": dns,
+            "internet_ms": net.get("latency_ms"),
+            "internet_ok": net.get("reachable", False),
+            "lease_start": lease,
+            "connected_for_s": int(time.time() - lease) if lease else None}
+
+
 # ---------- LAN devices ----------
 def _arp_table() -> dict:
     out = _run(["arp", "-a"], timeout=5)

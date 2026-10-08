@@ -278,6 +278,15 @@ def disconnect_now():
 def get_policy():
     return policy.policy_status()
 
+@app.get("/api/real/link")
+def real_link():
+    return real_net.link_stats()
+
+@app.post("/api/real/speedtest")
+def real_speedtest():
+    mbps = real_net.speed_test()
+    return {"speed_mbps": mbps, "ok": mbps is not None}
+
 @app.get("/api/demo/attack")
 def demo_status():
     return attacker.status()
