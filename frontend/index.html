@@ -39,15 +39,8 @@ button{min-height:40px}
       <div class="text-sm font-bold flex items-center gap-2"><span id="liveRisk" class="px-2 py-1 rounded">–</span> <span id="liveVerdict" class="ml-2"></span><button id="btnDisconnect" title="Emergency: turn Wi-Fi off" class="bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded text-xs font-bold">Disconnect Wi-Fi</button><button id="btnDemoAttack" title="Stage demo: virtual evil-twin attacker (simulated)" class="bg-red-600 hover:bg-red-500 text-white px-2 py-1 rounded text-xs font-bold">🎭 Simulate attack</button></div>
     </div>
     <div id="liveCards" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3"></div>
-    <h3 class="font-bold text-sm mb-1">Protocol checks — is it OK to connect?</h3>
-    <div class="overflow-x-auto mb-3"><table class="w-full text-sm rtable">
-      <thead class="text-slate-500"><tr><th class="text-left p-2">Check</th><th class="text-left p-2">Result</th><th class="text-left p-2">Detail</th></tr></thead>
-      <tbody id="liveChecks"></tbody>
-    </table></div>
-    <div class="grid md:grid-cols-2 gap-3 mb-4 text-sm">
-      <div class="bg-slate-50 border border-slate-200 rounded p-3"><b>Why this score</b><ul id="liveReasons" class="list-disc ml-5 mt-1 text-slate-600"></ul></div>
-      <div class="bg-slate-50 border border-slate-200 rounded p-3"><b>🛡️ What to do</b><ul id="liveRecs" class="list-disc ml-5 mt-1 text-slate-600"></ul></div>
-    </div>
+    <h3 class="font-bold text-sm mb-1">Selected network — click any radar blip or list row</h3>
+    <div id="radarDetail" class="text-sm bg-slate-50 border border-slate-200 rounded p-3 mb-4 max-h-[60vh] overflow-y-auto"><span class="text-slate-400">Select a network ↑</span></div>
 
     <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
       <h3 class="font-bold">📡 Signal Radar <span id="radarMeta" class="text-xs font-normal text-slate-500"></span></h3>
@@ -70,7 +63,15 @@ button{min-height:40px}
       <div><canvas id="radar" class="w-full rounded bg-[#e9f1f9] border border-slate-200" style="aspect-ratio:1"></canvas></div>
       <div class="min-w-0">
         <div id="radarList" class="text-sm space-y-1 max-h-52 overflow-y-auto mb-2"></div>
-        <div id="radarDetail" class="text-sm bg-slate-50 border border-slate-200 rounded p-3 max-h-96 overflow-y-auto"><span class="text-slate-400">Select a network ↑</span></div>
+        <h3 class="font-bold text-sm mb-1">Protocol checks — is it OK to connect?</h3>
+        <div class="overflow-x-auto mb-3 max-h-72 overflow-y-auto"><table class="w-full text-sm rtable">
+          <thead class="text-slate-500"><tr><th class="text-left p-2">Check</th><th class="text-left p-2">Result</th><th class="text-left p-2">Detail</th></tr></thead>
+          <tbody id="liveChecks"></tbody>
+        </table></div>
+        <div class="grid gap-3 text-sm">
+          <div class="bg-slate-50 border border-slate-200 rounded p-3"><b>Why this score</b><ul id="liveReasons" class="list-disc ml-5 mt-1 text-slate-600"></ul></div>
+          <div class="bg-slate-50 border border-slate-200 rounded p-3"><b>🛡️ What to do</b><ul id="liveRecs" class="list-disc ml-5 mt-1 text-slate-600"></ul></div>
+        </div>
       </div>
     </div>
 
