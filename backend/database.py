@@ -45,6 +45,14 @@ def init_db():
     cur.execute("""CREATE TABLE IF NOT EXISTS flagged_devices(
         ip TEXT PRIMARY KEY, mac TEXT, note TEXT, ts TEXT
     )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS net_observations(
+        ssid TEXT PRIMARY KEY, security TEXT, channel TEXT, signal_dbm REAL,
+        first_seen TEXT, last_seen TEXT, seen_count INTEGER
+    )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS health_history(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, gateway_ms REAL,
+        loss_pct REAL, signal_dbm REAL, risk_score INTEGER, verdict TEXT
+    )""")
     c.commit()
     c.close()
 
@@ -188,3 +196,185 @@ def get_flagged():
     rows = c.execute("SELECT * FROM flagged_devices").fetchall()
     c.close()
     return [dict(r) for r in rows]
+
+
+# ---- Rogue-AP observation history ----
+def observe_networks(nets: list):
+    """Record the latest fingerprint per SSID. Best-effort; never raises."""
+    try:
+        c = conn()
+        for n in nets or []:
+            ssid = (n.get("ssid") or "").strip()
+            if not ssid:
+                continue
+            ts = now_iso()
+            sig = n.get("signal_dbm")
+            try:
+                sig = float(sig) if sig is not None else None
+            except (TypeError, ValueError):
+                sig = None
+            cur = c.execute("SELECT seen_count, first_seen FROM net_observations WHERE ssid=?",
+                            (ssid,)).fetchone()
+            if cur:
+                c.execute("UPDATE net_observations SET security=?, channel=?, signal_dbm=?, "
+                          "last_seen=?, seen_count=? WHERE ssid=?",
+                          (n.get("security", ""), str(n.get("channel", "")), sig, ts,
+                           int(cur["seen_count"] or 0) + 1, ssid))
+            else:
+                c.execute("INSERT INTO net_observations(ssid,security,channel,signal_dbm,"
+                          "first_seen,last_seen,seen_count) VALUES(?,?,?,?,?,?,1)",
+                          (ssid, n.get("security", ""), str(n.get("channel", "")),
+                           sig, ts, ts))
+        c.commit()
+        c.close()
+    except Exception:
+        pass
+
+
+def get_network_history():
+    try:
+        c = conn()
+        rows = c.execute("SELECT * FROM net_observations ORDER BY last_seen DESC").fetchall()
+        c.close()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+# ---- Health history + before/after verification ----
+def record_health(gateway_ms=None, loss_pct=None, signal_dbm=None,
+                  risk_score=None, verdict="", min_interval_s=60):
+    """Append a health sample, throttled. Returns True when stored."""
+    try:
+        c = conn()
+        last = c.execute("SELECT ts FROM health_history ORDER BY id DESC LIMIT 1").fetchone()
+        if last:
+            try:
+                from datetime import datetime
+                age = (datetime.now(timezone.utc) -
+                       datetime.fromisoformat(last["ts"])).total_seconds()
+                if age < min_interval_s:
+                    c.close()
+                    return False
+            except Exception:
+                pass
+        c.execute("INSERT INTO health_history(ts,gateway_ms,loss_pct,signal_dbm,"
+                  "risk_score,verdict) VALUES(?,?,?,?,?,?)",
+                  (now_iso(), gateway_ms, loss_pct, signal_dbm, risk_score, verdict))
+        c.execute("DELETE FROM health_history WHERE id NOT IN "
+                  "(SELECT id FROM health_history ORDER BY id DESC LIMIT 500)")
+        c.commit()
+        c.close()
+        return True
+    except Exception:
+        return False
+
+
+def get_health_history(limit: int = 60):
+    try:
+        c = conn()
+        rows = c.execute("SELECT * FROM health_history ORDER BY id DESC LIMIT ?",
+                         (int(limit),)).fetchall()
+        c.close()
+        return [dict(r) for r in reversed(rows)]
+    except Exception:
+        return []
+
+
+def _avg(vals):
+    vals = [v for v in vals if v is not None]
+    return round(sum(vals) / len(vals), 2) if vals else None
+
+
+def verify_health(window_min: int = 30):
+    """Compare the older vs newer half of recent health samples.
+
+    Returns before/after averages and whether the network improved.
+    Insufficient data is reported explicitly instead of guessed.
+    """
+    try:
+        window_min = max(5, min(int(window_min), 720))
+    except (TypeError, ValueError):
+        window_min = 30
+    try:
+        from datetime import datetime, timedelta
+        c = conn()
+        cutoff = (datetime.now(timezone.utc) -
+                  timedelta(minutes=window_min)).isoformat()
+        rows = c.execute("SELECT * FROM health_history WHERE ts >= ? ORDER BY id ASC",
+                         (cutoff,)).fetchall()
+        c.close()
+        rows = [dict(r) for r in rows]
+    except Exception:
+        return {"ok": False, "detail": "verification unavailable"}
+    if len(rows) < 4:
+        return {"ok": False, "detail": f"insufficient samples ({len(rows)} in window); "
+                "health samples record about once a minute while the dashboard polls",
+                "samples": len(rows), "window_min": window_min}
+    half = len(rows) // 2
+    before, after = rows[:half], rows[half:]
+
+    def summ(rs):
+        return {"samples": len(rs),
+                "from": rs[0]["ts"], "to": rs[-1]["ts"],
+                "avg_gateway_ms": _avg([r["gateway_ms"] for r in rs]),
+                "avg_loss_pct": _avg([r["loss_pct"] for r in rs]),
+                "avg_signal_dbm": _avg([r["signal_dbm"] for r in rs]),
+                "avg_risk": _avg([r["risk_score"] for r in rs])}
+    b, a = summ(before), summ(after)
+    wins = 0
+    total = 0
+    for key, better in (("avg_gateway_ms", "lower"), ("avg_loss_pct", "lower"),
+                        ("avg_signal_dbm", "higher"), ("avg_risk", "lower")):
+        if b[key] is not None and a[key] is not None:
+            total += 1
+            if better == "lower" and a[key] < b[key]:
+                wins += 1
+            elif better == "higher" and a[key] > b[key]:
+                wins += 1
+    if total == 0:
+        verdict = "insufficient data"
+    elif wins >= max(2, (total + 1) // 2 + 1):
+        verdict = "improved"
+    elif wins == 0:
+        verdict = "degraded"
+    else:
+        verdict = "mixed"
+    return {"ok": True, "window_min": window_min, "before": b, "after": a,
+            "metrics_compared": total, "metrics_improved": wins,
+            "verdict": verdict,
+            "note": "Compares passive health samples before vs after; "
+                    "improvement suggests the action helped, it does not prove causation."}
+
+
+def get_timeline(limit: int = 50):
+    """Merged incident + event chronology (newest first) for the timeline panel."""
+    try:
+        limit = max(1, min(int(limit), 200))
+    except (TypeError, ValueError):
+        limit = 50
+    items = []
+    try:
+        c = conn()
+        ev = c.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?",
+                       (limit,)).fetchall()
+        inc = c.execute("SELECT * FROM incidents ORDER BY id DESC LIMIT ?",
+                        (limit,)).fetchall()
+        c.close()
+        for r in ev:
+            r = dict(r)
+            items.append({"kind": "event", "ts": r.get("ts"), "title": r.get("type", ""),
+                          "detail": r.get("detail", ""),
+                          "device": r.get("device_id", ""),
+                          "risk_delta": r.get("risk_delta", 0)})
+        for r in inc:
+            r = dict(r)
+            items.append({"kind": "incident", "ts": r.get("ts"),
+                          "title": f"incident risk {r.get('risk', '?')}",
+                          "detail": f"{r.get('reasons', '')} | {r.get('action', '')}",
+                          "device": r.get("device_id", ""),
+                          "risk_delta": r.get("risk", 0)})
+    except Exception:
+        return []
+    items.sort(key=lambda x: x.get("ts") or "", reverse=True)
+    return items[:limit]

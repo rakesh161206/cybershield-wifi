@@ -73,8 +73,13 @@ def ai_score(features: Dict) -> Dict:
 
 
 # ---------------- LIVE environment AI (real network, not simulated) ----------------
+# Core environment features plus packet/flow telemetry. Packet features are
+# measured best-effort (gateway loss probe, interface counters, socket
+# table) and imputed to the median when the host cannot provide them.
 LIVE_FEATURES = ["nearby_count", "open_count", "lan_devices",
-                 "gateway_ms", "dns_ms", "signal_dbm"]
+                 "gateway_ms", "dns_ms", "signal_dbm",
+                 "packet_loss_pct", "packet_rate_pps", "tcp_retrans",
+                 "tcp_connections", "dest_diversity"]
 # Normal home-Wi-Fi ranges: (lo, hi, median-for-imputation)
 NORMAL_RANGES = {
     "nearby_count": (2, 15, 7),
@@ -83,6 +88,11 @@ NORMAL_RANGES = {
     "gateway_ms": (1, 40, 5),
     "dns_ms": (2, 80, 15),
     "signal_dbm": (-70, -25, -55),
+    "packet_loss_pct": (0, 5, 0),
+    "packet_rate_pps": (0, 500, 40),
+    "tcp_retrans": (0, 50, 2),
+    "tcp_connections": (1, 60, 10),
+    "dest_diversity": (1, 20, 5),
 }
 BASELINE_SAMPLES = 300
 _live_model = None
@@ -118,6 +128,11 @@ def _train_live():
             rng.uniform(1, 40),                    # gateway_ms
             rng.uniform(2, 80),                    # dns_ms
             rng.uniform(-70, -25),                 # signal_dbm
+            rng.uniform(0, 3),                     # packet_loss_pct
+            rng.uniform(0, 300),                   # packet_rate_pps
+            rng.randint(0, 20),                    # tcp_retrans
+            rng.randint(1, 40),                    # tcp_connections
+            rng.randint(1, 12),                    # dest_diversity
         ])
     _live_model = IsolationForest(contamination=0.08, random_state=7)
     _live_model.fit(np.array(X))
@@ -143,8 +158,8 @@ def assess_live(snapshot: Dict) -> Dict:
     outside = [k for k, v in zip(LIVE_FEATURES, vec)
                if not (NORMAL_RANGES[k][0] <= v <= NORMAL_RANGES[k][1])]
     if not SKLEARN_OK:
-        return {"anomaly": len(outside) >= 2,
-                "score": round(min(1.0, len(outside) / 3.0), 3),
+        return {"anomaly": len(outside) >= 3,
+                "score": round(min(1.0, len(outside) / 4.0), 3),
                 "detail": f"rule-fallback: {len(outside)} feature(s) outside normal range",
                 "engine": "rules",
                 "outside_features": outside}

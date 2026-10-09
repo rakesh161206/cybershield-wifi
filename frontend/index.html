@@ -52,6 +52,8 @@ button{min-height:40px}
     </div>
     <p class="text-xs text-slate-500 mb-2">All nearby signals, positioned by strength · click a blip for verdict + threat analysis · distance is estimated (walls/routers vary)</p>
     <div id="policyBanner" class="hidden"></div>
+    <div id="rogueBanner" class="hidden"></div>
+    <div id="diagPanel" class="hidden"></div>
     <div class="grid md:grid-cols-2 gap-4 mb-4">
       <div><canvas id="radar" class="w-full rounded bg-[#e9f1f9] border border-slate-200" style="aspect-ratio:1"></canvas></div>
       <div class="min-w-0">
@@ -90,7 +92,40 @@ button{min-height:40px}
       <thead class="text-slate-500"><tr><th class="text-left p-2">Signal</th><th class="text-left p-2">Live value</th><th class="text-left p-2">Normal range</th><th class="text-left p-2">Status</th></tr></thead>
       <tbody id="aiRows"></tbody>
     </table></div>
-    <p class="text-xs text-slate-400 mt-2">Isolation Forest trained on normal home-Wi-Fi snapshots. The AI corroborates the rule-based risk above — rule signals stay authoritative.</p>
+    <p class="text-xs text-slate-400 mt-2">Isolation Forest trained on normal home-Wi-Fi snapshots, extended with packet and flow telemetry (loss, rate, retransmissions, connections, destination diversity). The AI corroborates the rule-based risk above — rule signals stay authoritative.</p>
+  </section>
+
+  <section class="card rounded p-4 mb-4">
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+      <h2 class="font-bold text-lg">Packet and Flow Telemetry <span id="pktDot" class="text-xs text-slate-400">checking…</span></h2>
+      <button id="btnProbe" class="bg-sky-600 hover:bg-sky-500 text-white px-4 py-2 rounded text-sm">Measure loss</button>
+    </div>
+    <div id="pktCards" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3"></div>
+    <p id="pktMeta" class="text-xs text-slate-400 mb-3"></p>
+    <h3 class="font-bold text-sm mb-1">Packet capture (headers only, optional)</h3>
+    <p class="text-xs text-slate-500 mb-2">Bounded tcpdump captures, truncated to headers and auto-expired after 15 minutes. Requires tcpdump on the host; loss and flow metrics work without it.</p>
+    <div class="flex flex-wrap items-end gap-2 text-sm mb-2">
+      <label class="text-xs text-slate-500">Interface <input id="capIface" value="en0" class="border border-slate-300 rounded px-2 py-1 w-24 mono"></label>
+      <label class="text-xs text-slate-500">Seconds (1–30) <input id="capDur" type="number" value="10" min="1" max="30" class="border border-slate-300 rounded px-2 py-1 w-20"></label>
+      <label class="text-xs text-slate-500">Max packets (1–2000) <input id="capPkts" type="number" value="500" min="1" max="2000" class="border border-slate-300 rounded px-2 py-1 w-24"></label>
+      <label class="text-xs text-slate-500">Filter (optional) <input id="capFilter" placeholder="e.g. arp or icmp" class="border border-slate-300 rounded px-2 py-1 w-40 mono"></label>
+      <button id="btnCapStart" class="bg-slate-800 hover:bg-slate-700 text-white px-3 py-1 rounded text-sm">Start capture</button>
+      <button id="btnCapStop" class="bg-slate-200 hover:bg-slate-300 px-3 py-1 rounded text-sm">Stop</button>
+    </div>
+    <p id="capStatus" class="text-xs text-slate-500 mb-1"></p>
+    <div id="capFiles" class="text-sm space-y-1"></div>
+  </section>
+
+  <section class="card rounded p-4 mb-4">
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+      <h2 class="font-bold text-lg">Incident Timeline and Verification</h2>
+      <div class="flex items-center gap-2 text-sm">
+        <label class="text-xs text-slate-500">Window <select id="verifyWindow" class="border border-slate-300 rounded px-2 py-1"><option value="15">15 min</option><option value="30" selected>30 min</option><option value="60">60 min</option></select></label>
+        <button id="btnVerify" class="bg-sky-600 hover:bg-sky-500 text-white px-3 py-1 rounded text-sm">Verify recovery</button>
+      </div>
+    </div>
+    <p id="verifyResult" class="text-sm mb-2"></p>
+    <div id="timelineList" class="text-sm space-y-1 max-h-64 overflow-y-auto"></div>
   </section>
 
   <footer class="text-center text-xs text-slate-400 mt-6">
@@ -248,7 +283,29 @@ async function loadRadar(){
       <div class="text-slate-500 ml-5 mb-1">${esc((a.reasons || []).join(' · '))}${a.preferred ? ' · <i>in your preferred list (auto-joins)</i>' : ''}</div>`).join('')
       + (blocked.length ? `<div class="mt-1 text-slate-600">Blocklist (${blocked.length}): ${blocked.map(x=>`${esc(x.ssid)}${x.auto ? ' <i>auto</i>' : ''}`).join(' · ')}</div>` : '');
     pb.className = (pend.length || blocked.length) ? 'text-xs mb-2 p-2 rounded border border-yellow-200 bg-yellow-50' : 'hidden';
+    renderRogue(r.rogue_warnings || []);
+    renderDiag(r.diagnosis);
   }catch(e){ document.getElementById('radarMeta').textContent = 'scan failed'; }
+}
+function renderRogue(warnings){
+  const el = document.getElementById('rogueBanner');
+  if(!warnings.length){ el.className = 'hidden'; el.innerHTML=''; return; }
+  const sev = s => s==='high'?'background:#fee2e2;color:#991b1b':s==='medium'?'background:#fef9c3;color:#854d0e':'background:#e2e8f0;color:#475569';
+  el.innerHTML = warnings.map(w=>
+    `<div class="mb-1"><span class="px-1 rounded font-bold text-xs" style="${sev(w.severity)}">${esc(w.severity.toUpperCase())}</span> <b>${esc(w.ssid)}</b> <span class="text-slate-600">— ${esc(w.detail)}</span><div class="text-slate-500 ml-2">${esc(w.recommendation||'')}</div></div>`).join('')
+    + '<div class="text-slate-400 mt-1">Rogue-AP entries are risk indicators, not proof of an attack — confirm with the network owner.</div>';
+  el.className = 'text-xs mb-2 p-2 rounded border border-orange-200 bg-orange-50';
+}
+function renderDiag(d){
+  const el = document.getElementById('diagPanel');
+  if(!d){ el.className='hidden'; el.innerHTML=''; return; }
+  const col = d.verdict==='healthy'?'#16a34a':d.verdict==='network_fault'?'#a16207':d.verdict==='mixed'?'#c026d3':'#dc2626';
+  const ev = [...(d.attack_evidence||[]).map(x=>`<li><b>Attack signal:</b> ${esc(x)}</li>`), ...(d.fault_evidence||[]).map(x=>`<li><b>Fault signal:</b> ${esc(x)}</li>`)].join('') || '<li>No specific evidence.</li>';
+  el.innerHTML = `<div class="flex flex-wrap items-center gap-2 text-sm mb-1"><b>Diagnosis:</b> <span class="font-bold" style="color:${col}">${esc(d.verdict.replace(/_/g,' ').toUpperCase())}</span><span class="text-slate-500 text-xs">confidence ${esc(d.confidence)} · attack ${esc(d.attack_score)} / fault ${esc(d.fault_score)}</span></div>
+    <div class="text-sm text-slate-600 mb-1">${esc(d.explanation||'')}</div>
+    <ul class="list-disc ml-5 text-sm text-slate-600 mb-1">${ev}</ul>
+    <div class="text-sm"><b>Recommended:</b> ${esc(d.recommended_action||'')}</div>`;
+  el.className = 'text-sm mb-2 p-2 rounded border border-slate-200 bg-slate-50';
 }
 function renderRadarSel(){
   const n = radarNets.find(x=>x.ssid===radarSel) || radarNets[0];
@@ -283,7 +340,7 @@ document.getElementById('radar').addEventListener('click', ev=>{  const cv = ev.
 });
 
 // ---------- AI ----------
-const AI_LABELS = {nearby_count:'Nearby networks', open_count:'Open networks', lan_devices:'Devices on LAN', gateway_ms:'Gateway latency (ms)', dns_ms:'DNS latency (ms)', signal_dbm:'Signal (dBm)'};
+const AI_LABELS = {nearby_count:'Nearby networks', open_count:'Open networks', lan_devices:'Devices on LAN', gateway_ms:'Gateway latency (ms)', dns_ms:'DNS latency (ms)', signal_dbm:'Signal (dBm)', packet_loss_pct:'Packet loss (%)', packet_rate_pps:'Packet rate (pps)', tcp_retrans:'TCP retransmissions', tcp_connections:'TCP connections', dest_diversity:'Destination diversity'};
 async function refreshAI(){
   let d;
   try{ d = await api('/api/real/ai'); }catch(e){ return; }
@@ -314,6 +371,81 @@ refreshLive(); setInterval(refreshLive, 8000);
 refreshLan();
 loadRadar(); setInterval(loadRadar, 12000); drawRadar();
 refreshAI(); setInterval(refreshAI, 10000);
+refreshPacket(); setInterval(refreshPacket, 30000);
+refreshTimeline(); setInterval(refreshTimeline, 30000);
+refreshCapture();
+
+// ---------- packet / flow telemetry ----------
+async function refreshPacket(){
+  const dot = document.getElementById('pktDot');
+  try{
+    const r = await api('/api/real/packet');
+    const l = r.loss||{}, f = r.flow||{};
+    dot.textContent = l.ok ? `● gateway ${esc(l.target||'')} · ${l.cached?'cached':'fresh'}` : '● probe unavailable';
+    dot.className = 'text-xs ' + (l.ok ? 'text-green-600' : 'text-yellow-600');
+    const fmt = v => v==null ? 'n/a' : v;
+    document.getElementById('pktCards').innerHTML = [
+      ['Packet loss', l.loss_pct!=null?`<b>${l.loss_pct}%</b> <span class="text-slate-500">(${l.received}/${l.sent} replies)</span>`:'n/a'],
+      ['Avg latency', l.avg_ms!=null?`<b>${Number(l.avg_ms).toFixed(1)} ms</b>`:'n/a'],
+      ['TCP connections', `<b>${fmt(f.tcp_connections)}</b> <span class="text-slate-500">· ${fmt(f.dest_diversity)} destinations</span>`],
+      ['Packet rate', f.packet_rate_pps!=null?`<b>${f.packet_rate_pps} pps</b>`:'<span class="text-slate-400">collecting…</span>'],
+    ].map(([k,v])=>`<div class="bg-slate-50 border border-slate-200 rounded p-2"><div class="text-xs text-slate-500">${k}</div><div>${v}</div></div>`).join('');
+    document.getElementById('pktMeta').textContent =
+      `Flow metadata only (counters and headers, no payloads). Retransmissions: ${f.tcp_retrans ?? 'n/a'} · UDP entries: ${f.udp_entries ?? 'n/a'}${l.age_s!=null?` · probe age ${l.age_s}s`:''}`;
+  }catch(e){ dot.textContent = 'probe failed'; }
+}
+document.getElementById('btnProbe').onclick = async ()=>{
+  const b = document.getElementById('btnProbe'); b.textContent='Probing…';
+  try{ await api('/api/real/packet/probe',{method:'POST',body:JSON.stringify({count:5})}); }catch(e){}
+  b.textContent='Measure loss'; refreshPacket(); refreshAI();
+};
+
+// ---------- bounded capture controls ----------
+async function refreshCapture(){
+  try{
+    const r = await api('/api/real/capture/status');
+    const st = document.getElementById('capStatus');
+    st.textContent = r.tcpdump_available
+      ? (r.active ? `Capturing${r.capture?` on ${r.capture.interface} (${r.capture.elapsed_s}s elapsed)`:''}…` : `tcpdump ready · ${r.captures.length} file(s) retained · auto-expire ${Math.round(r.bounds.retention_s/60)} min`)
+      : 'tcpdump not installed — install it for captures; loss and flow metrics are unaffected.';
+    document.getElementById('capFiles').innerHTML = (r.captures||[]).map(c=>
+      `<div class="flex flex-wrap items-center gap-2 bg-slate-50 border border-slate-200 rounded px-2 py-1"><span class="mono text-xs">${esc(c.file)}</span><span class="text-xs text-slate-500">${(c.size/1024).toFixed(1)} KB · expires in ${Math.round(c.expires_in_s/60)} min</span><a class="text-sky-600 text-xs font-bold" href="/api/real/capture/download?file=${encodeURIComponent(c.file)}">Download</a></div>`).join('')
+      || '<div class="text-xs text-slate-400">No captures retained.</div>';
+    if(r.active) setTimeout(refreshCapture, 5000);
+  }catch(e){}
+}
+document.getElementById('btnCapStart').onclick = async ()=>{
+  const body = {interface: document.getElementById('capIface').value || 'en0',
+    duration_s: Number(document.getElementById('capDur').value || 10),
+    max_packets: Number(document.getElementById('capPkts').value || 500),
+    filter: document.getElementById('capFilter').value || ''};
+  const r = await api('/api/real/capture/start',{method:'POST',body:JSON.stringify(body)});
+  if(r.detail && !r.ok) alert(r.detail);
+  refreshCapture();
+};
+document.getElementById('btnCapStop').onclick = async ()=>{ await api('/api/real/capture/stop',{method:'POST'}); refreshCapture(); };
+
+// ---------- incident timeline + verification ----------
+async function refreshTimeline(){
+  try{
+    const r = await api('/api/real/timeline?limit=40');
+    document.getElementById('timelineList').innerHTML = (r.timeline||[]).map(t=>
+      `<div class="bg-slate-50 border border-slate-200 rounded px-2 py-1"><span class="text-xs text-slate-400">${esc((t.ts||'').slice(0,19).replace('T',' '))}</span> <span class="font-bold text-xs">${t.kind==='incident'?'INCIDENT':'event'}</span> <b>${esc(t.title||'')}</b> <span class="text-slate-600">${esc(t.device||'')}</span><div class="text-xs text-slate-600">${esc(t.detail||'')}</div></div>`).join('')
+      || '<div class="text-xs text-slate-400">No events yet.</div>';
+  }catch(e){}
+}
+document.getElementById('btnVerify').onclick = async ()=>{
+  const w = document.getElementById('verifyWindow').value || 30;
+  const el = document.getElementById('verifyResult'); el.textContent = 'Comparing…';
+  try{
+    const r = await api(`/api/real/verify?window_min=${w}`);
+    if(!r.ok){ el.textContent = r.detail || 'Not enough data yet.'; return; }
+    const f = (k,v) => v==null?'n/a':k.includes('signal')?`${v} dBm`:k.includes('loss')?`${v}%`:k.includes('gateway')?`${v} ms`:v;
+    el.innerHTML = `<b>Verdict: ${esc(r.verdict.toUpperCase())}</b> <span class="text-slate-500">(${r.before.samples} vs ${r.after.samples} samples, last ${r.window_min} min · ${r.metrics_improved}/${r.metrics_compared} metrics improved)</span>
+      <div class="text-xs text-slate-600 mt-1">Gateway ${f('gateway',r.before.avg_gateway_ms)} → ${f('gateway',r.after.avg_gateway_ms)} · Loss ${f('loss',r.before.avg_loss_pct)} → ${f('loss',r.after.avg_loss_pct)} · Signal ${f('signal',r.before.avg_signal_dbm)} → ${f('signal',r.after.avg_signal_dbm)} · Risk ${f('risk',r.before.avg_risk)} → ${f('risk',r.after.avg_risk)}</div>
+      <div class="text-xs text-slate-400">${esc(r.note||'')}</div>`;
+  }catch(e){ el.textContent = 'Verification failed.'; }
+};
 </script>
 </body>
 </html>

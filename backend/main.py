@@ -2,7 +2,7 @@
 Software-only prototype: simulated Wi-Fi telemetry + Zero-Trust + AI + decoys.
 Same security engine can later connect to real AP/controller logs.
 """
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -18,6 +18,9 @@ from backend import database as db
 from backend import real_net
 from backend import threat_model
 from backend import policy
+from backend import packet_monitor
+from backend import rogue
+from backend import diagnosis
 from backend.simulator import NORMAL_DEVICES, DECOYS, ALLOW_LIST, DENY_LIST, fresh_device_state
 
 app = FastAPI(title="CyberShield Wi-Fi")
@@ -175,7 +178,9 @@ def decoy_hit(decoy_id: str, device_id: str = Query("DEVICE-007")):
 # ---- LIVE host network (real Wi-Fi, not simulated) ----
 @app.get("/api/real/status")
 def real_status():
-    return real_net.full_status()
+    st = real_net.full_status()
+    _record_health_sample(st)
+    return st
 
 @app.get("/api/real/networks")
 def real_networks():
@@ -190,6 +195,8 @@ def real_radar():
     st = real_net.full_status()
     ssid = (st.get("wifi") or {}).get("ssid", "")
     nearby = real_net.get_nearby(ssid)
+    warnings = rogue.detect(nearby, ssid)
+    db.observe_networks(nearby)
     nets = threat_model.assess(nearby)
     pending = policy.evaluate_pending(nets)
     # refresh blocked flags after enforcement
@@ -198,9 +205,25 @@ def real_radar():
     counts = {"connect": 0, "caution": 0, "avoid": 0}
     for n in nets:
         counts[n["recommendation"]["verdict"]] += 1
+    radar_summary = {"count": len(nets), "summary": counts}
+    lan = real_net.get_lan_devices(mode="fast")
+    snapshot = {
+        "nearby_count": len(nearby),
+        "open_count": sum(1 for n in nearby if (n.get("security") or "").startswith("Open")),
+        "lan_devices": len(lan.get("devices", [])),
+        "gateway_ms": st.get("gateway_ms"),
+        "dns_ms": st.get("dns_ms"),
+        "signal_dbm": (st.get("wifi") or {}).get("signal_dbm"),
+    }
+    snapshot.update(packet_monitor.packet_features())
+    assessment = ai_detector.assess_live(snapshot)
+    loss = packet_monitor.last_loss() or {}
+    _record_health_sample(st)
     return {"scanned_at": time.time(), "count": len(nets),
             "current_ssid": ssid, "summary": counts, "networks": nets,
-            "pending_blocks": pending, "policy": policy.policy_status()}
+            "pending_blocks": pending, "policy": policy.policy_status(),
+            "rogue_warnings": warnings,
+            "diagnosis": diagnosis.classify(st, assessment, warnings, loss, radar_summary)}
 
 class SsidReq(BaseModel):
     ssid: str = ""
@@ -209,6 +232,48 @@ class FlagReq(BaseModel):
     ip: str = ""
     mac: str = ""
     note: str = "flagged by admin"
+
+
+class CaptureReq(BaseModel):
+    interface: str = "en0"
+    duration_s: int = 10
+    max_packets: int = 500
+    filter: str = ""
+
+
+class ProbeReq(BaseModel):
+    count: int = 5
+
+
+def _live_snapshot():
+    """Shared live-environment snapshot (non-blocking packet features)."""
+    st = real_net.full_status()
+    ssid = (st.get("wifi") or {}).get("ssid", "")
+    nets = real_net.get_nearby(ssid)
+    lan = real_net.get_lan_devices(mode="fast")
+    snapshot = {
+        "nearby_count": len(nets),
+        "open_count": sum(1 for n in nets if (n.get("security") or "").startswith("Open")),
+        "lan_devices": len(lan.get("devices", [])),
+        "gateway_ms": st.get("gateway_ms"),
+        "dns_ms": st.get("dns_ms"),
+        "signal_dbm": (st.get("wifi") or {}).get("signal_dbm"),
+    }
+    snapshot.update(packet_monitor.packet_features())
+    return st, nets, lan, snapshot
+
+
+def _record_health_sample(st):
+    try:
+        loss = packet_monitor.last_loss() or {}
+        db.record_health(
+            gateway_ms=st.get("gateway_ms"),
+            loss_pct=loss.get("loss_pct"),
+            signal_dbm=(st.get("wifi") or {}).get("signal_dbm"),
+            risk_score=(st.get("risk") or {}).get("score"),
+            verdict=(st.get("risk") or {}).get("level", ""))
+    except Exception:
+        pass
 
 @app.post("/api/real/block")
 def block_network(req: SsidReq):
@@ -277,22 +342,134 @@ def real_scan():
 @app.get("/api/real/ai")
 def real_ai():
     """AI verdict on the CURRENT real environment + engine health."""
-    st = real_net.full_status()
-    ssid = (st.get("wifi") or {}).get("ssid", "")
-    nets = real_net.get_nearby(ssid)
-    lan = real_net.get_lan_devices(mode="fast")
-    snapshot = {
-        "nearby_count": len(nets),
-        "open_count": sum(1 for n in nets if (n.get("security") or "").startswith("Open")),
-        "lan_devices": len(lan.get("devices", [])),
-        "gateway_ms": st.get("gateway_ms"),
-        "dns_ms": st.get("dns_ms"),
-        "signal_dbm": (st.get("wifi") or {}).get("signal_dbm"),
-    }
+    st, nets, lan, snapshot = _live_snapshot()
     return {"snapshot": snapshot,
             "assessment": ai_detector.assess_live(snapshot),
             "status": ai_detector.engine_status(),
             "normal_ranges": ai_detector.NORMAL_RANGES}
+
+
+# ---- Packet / flow telemetry (privacy-preserving, headers only) ----
+@app.get("/api/real/packet")
+def packet_status(count: int = 5, fresh: int = 0):
+    """Gateway loss probe + local flow metadata. Set fresh=1 to re-probe."""
+    try:
+        count = max(1, min(int(count), 10))
+    except (TypeError, ValueError):
+        count = 5
+    st = real_net.full_status()
+    gw = (st.get("ip") or {}).get("gateway", "")
+    loss = packet_monitor.measure_loss(host=gw or None, count=count,
+                                       force=bool(fresh))
+    flow = packet_monitor.flow_stats(force=bool(fresh))
+    return {"loss": loss, "flow": flow, "gateway": gw,
+            "measured_at": loss.get("measured_at")}
+
+
+@app.post("/api/real/packet/probe")
+def packet_probe(req: ProbeReq):
+    st = real_net.full_status()
+    gw = (st.get("ip") or {}).get("gateway", "")
+    try:
+        count = max(1, min(int(req.count), 10))
+    except (TypeError, ValueError):
+        count = 5
+    return packet_monitor.measure_all(gateway=gw or None, count=count)
+
+
+# ---- Rogue-AP warnings + attack-vs-fault diagnosis ----
+@app.get("/api/real/rogue")
+def rogue_status():
+    st = real_net.full_status()
+    ssid = (st.get("wifi") or {}).get("ssid", "")
+    nearby = real_net.get_nearby(ssid)
+    warnings = rogue.detect(nearby, ssid)
+    db.observe_networks(nearby)
+    return {"current_ssid": ssid, "count": len(nearby),
+            "warnings": warnings,
+            "note": rogue.INDICATOR_NOTE}
+
+
+@app.get("/api/real/diagnosis")
+def diagnosis_status():
+    st, nets, lan, snapshot = _live_snapshot()
+    ssid = (st.get("wifi") or {}).get("ssid", "")
+    warnings = rogue.detect(nets, ssid)
+    db.observe_networks(nets)
+    assessment = ai_detector.assess_live(snapshot)
+    loss = packet_monitor.last_loss() or {}
+    scored = threat_model.assess(nets)
+    radar_summary = {"count": len(scored),
+                     "summary": {"avoid": sum(1 for n in scored if n["recommendation"]["verdict"] == "avoid"),
+                                 "caution": sum(1 for n in scored if n["recommendation"]["verdict"] == "caution"),
+                                 "connect": sum(1 for n in scored if n["recommendation"]["verdict"] == "connect")}}
+    result = diagnosis.classify(st, assessment, warnings, loss, radar_summary)
+    result["rogue_warnings"] = warnings
+    result["ai"] = assessment
+    return result
+
+
+# ---- Incident timeline + before/after verification ----
+@app.get("/api/real/timeline")
+def timeline(limit: int = 50):
+    try:
+        limit = max(1, min(int(limit), 200))
+    except (TypeError, ValueError):
+        limit = 50
+    return {"timeline": db.get_timeline(limit),
+            "health": db.get_health_history(min(limit, 60))}
+
+
+@app.get("/api/real/health/history")
+def health_history(limit: int = 60):
+    try:
+        limit = max(1, min(int(limit), 500))
+    except (TypeError, ValueError):
+        limit = 60
+    return {"history": db.get_health_history(limit)}
+
+
+@app.get("/api/real/verify")
+def verify(window_min: int = 30):
+    try:
+        window_min = max(5, min(int(window_min), 720))
+    except (TypeError, ValueError):
+        window_min = 30
+    return db.verify_health(window_min)
+
+
+# ---- Bounded PCAP capture (tcpdump, optional, auto-expiring) ----
+@app.get("/api/real/capture/status")
+def capture_status():
+    return packet_monitor.capture_status()
+
+
+@app.post("/api/real/capture/start")
+def capture_start(req: CaptureReq):
+    res = packet_monitor.start_capture(interface=req.interface or "en0",
+                                       duration_s=req.duration_s,
+                                       max_packets=req.max_packets,
+                                       pcap_filter=req.filter or "")
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res.get("detail", "capture failed"))
+    db.log_event("ADMIN", "capture-start",
+                 f"Packet capture started on {req.interface} "
+                 f"({req.duration_s}s, max {req.max_packets} pkts, headers only)", 0)
+    return res
+
+
+@app.post("/api/real/capture/stop")
+def capture_stop():
+    return packet_monitor.stop_capture()
+
+
+@app.get("/api/real/capture/download")
+def capture_download(file: str = Query("")):
+    path = packet_monitor.resolve_capture(file)
+    if not path:
+        raise HTTPException(status_code=404, detail="capture not found or expired")
+    return FileResponse(path, media_type="application/vnd.tcpdump.pcap",
+                        filename=os.path.basename(path))
 
 # serve frontend
 @app.get("/", include_in_schema=False)
