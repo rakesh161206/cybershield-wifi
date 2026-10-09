@@ -34,16 +34,12 @@ button{min-height:40px}
   </header>
 
   <section class="card rounded p-4 mb-4">
-    <div class="flex flex-wrap items-start justify-between gap-2 mb-3">
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
       <h2 class="font-bold text-lg">📡 LIVE — Your Real Wi-Fi <span id="liveDot" class="text-xs text-slate-500">checking…</span></h2>
-      <div class="flex flex-col items-end gap-2">
-        <div class="flex gap-2 text-sm text-center">
-          <div class="bg-slate-50 border border-slate-200 rounded px-2 py-1 min-w-[4.5rem]"><div class="text-[10px] text-slate-400">SPEED ↓</div><div class="font-bold" id="stSpeed">–</div></div>
-          <div class="bg-slate-50 border border-slate-200 rounded px-2 py-1 min-w-[4.5rem]"><div class="text-[10px] text-slate-400">PING</div><div class="font-bold" id="stPing">–</div></div>
-          <div class="bg-slate-50 border border-slate-200 rounded px-2 py-1 min-w-[4.5rem]"><div class="text-[10px] text-slate-400">ONLINE</div><div class="font-bold" id="stUp">–</div></div>
-          <button id="btnSpeed" title="Re-test internet speed (~10s)" class="bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded text-xs font-bold">↻</button>
-        </div>
-      <div class="text-sm font-bold flex items-center gap-2"><span id="liveRisk" class="px-2 py-1 rounded">–</span> <span id="liveVerdict" class="ml-2"></span><button id="btnDisconnect" title="Emergency: turn Wi-Fi off" class="bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded text-xs font-bold">Disconnect Wi-Fi</button><button id="btnDemoAttack" title="Stage demo: virtual evil-twin attacker (simulated)" class="bg-red-600 hover:bg-red-500 text-white px-2 py-1 rounded text-xs font-bold">🎭 Simulate attack</button></div>
+      <div class="text-sm font-bold flex flex-wrap items-center gap-2">
+        <span id="liveRisk" class="px-2 py-1 rounded">–</span>
+        <span id="liveVerdict" class="ml-2"></span>
+        <button id="btnDisconnect" title="Emergency: turn Wi-Fi off" class="bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded text-xs font-bold">Disconnect Wi-Fi</button>
       </div>
     </div>
     <div id="liveCards" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3"></div>
@@ -56,17 +52,6 @@ button{min-height:40px}
     </div>
     <p class="text-xs text-slate-500 mb-2">All nearby signals, positioned by strength · click a blip for verdict + threat analysis · distance is estimated (walls/routers vary)</p>
     <div id="policyBanner" class="hidden"></div>
-    <div id="attackPanel" class="hidden mb-3 p-3 rounded border border-red-300 bg-red-50 text-sm">
-      <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
-        <b>🎭 LIVE ATTACK (simulated): <span id="atkName"></span> → <span id="atkTarget"></span></b>
-        <div class="flex gap-2">
-          <button id="btnBlockTwin" class="bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-bold text-xs">Block twin</button>
-          <button id="btnStopDemo" class="bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded text-xs">End demo</button>
-        </div>
-      </div>
-      <div id="atkSteps" class="space-y-1"></div>
-      <p class="text-xs text-slate-500 mt-1">Persona: <span id="atkPersona"></span> · zero real packets — safe on any network</p>
-    </div>
     <div class="grid md:grid-cols-2 gap-4 mb-4">
       <div><canvas id="radar" class="w-full rounded bg-[#e9f1f9] border border-slate-200" style="aspect-ratio:1"></canvas></div>
       <div class="min-w-0">
@@ -163,36 +148,6 @@ document.getElementById('btnDisconnect').onclick = async () => {
   refreshLive();
 };
 
-// ---------- demo attacker ----------
-async function refreshDemo(){
-  let d;
-  try{ d = await api('/api/demo/attack'); }catch(e){ return; }
-  const p = document.getElementById('attackPanel');
-  const btn = document.getElementById('btnDemoAttack');
-  if(!d.active){ p.classList.add('hidden'); btn.textContent='🎭 Simulate attack'; btn.disabled=false; return; }
-  p.classList.remove('hidden');
-  btn.textContent='Attack running…'; btn.disabled=true;
-  document.getElementById('atkName').textContent = d.profile.id;
-  document.getElementById('atkTarget').textContent = '“' + (d.target || '') + '”';
-  document.getElementById('atkPersona').textContent = d.profile.operator;
-  const doneKeys = new Set((d.steps_done || []).map(s=>s.key));
-  document.getElementById('atkSteps').innerHTML = (d.timeline || []).map(s=>
-    doneKeys.has(s.key)
-      ? `<div>✅ <b>${esc(s.title)}</b> <span class="text-slate-500">(+${s.at}s)</span> — ${esc(s.detail)}</div>`
-      : `<div class="text-slate-400">… <b>${esc(s.title)}</b> <span>(+${s.at}s)</span></div>`).join('')
-    + (d.critical ? `<div class="font-bold text-red-700 mt-1">CRITICAL — credentials being harvested. Block the twin now.</div>` : '');
-}
-document.getElementById('btnDemoAttack').onclick = async ()=>{
-  await api('/api/demo/attack/start',{method:'POST',body:JSON.stringify({})});
-  refreshDemo(); loadRadar();
-};
-async function stopDemo(){
-  await api('/api/demo/attack/stop',{method:'POST'});
-  refreshDemo(); loadRadar();
-}
-document.getElementById('btnStopDemo').onclick = stopDemo;
-document.getElementById('btnBlockTwin').onclick = stopDemo;
-
 // ---------- radar (inline) ----------
 let radarNets = [], radarSel = null, radarRAF = null, radarAngle = 0;
 const vColor = v => v==='connect'?'#16a34a':v==='caution'?'#a16207':'#dc2626';
@@ -250,9 +205,7 @@ function radarDetailHTML(n){
     <div class="flex-1 bg-slate-200 rounded h-2"><div class="h-2 rounded" style="width:${n.score ?? 0}%;background:${vColor(r.verdict)}"></div></div>
   </div>
   <div class="flex flex-wrap items-center gap-2 mb-2 text-xs">
-    ${n.virtual
-      ? `<span class="px-2 py-1 rounded font-bold" style="background:#fee2e2;color:#991b1b">🎭 VIRTUAL TWIN (simulated)</span><button data-demostop="1" class="bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-bold">Block twin</button>`
-      : n.blocked
+    ${n.blocked
       ? `<span class="px-2 py-1 rounded font-bold" style="background:#fee2e2;color:#991b1b">BLOCKED — won't auto-join</span><button data-unblock="${esc(n.ssid)}" class="bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded font-bold">Unblock (allow)</button>`
       : `<button data-block="${esc(n.ssid)}" class="bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-bold">Block this network</button>`}
     ${n.preferred && !n.blocked ? '<span class="text-slate-500">· in preferred list (auto-joins)</span>' : ''}
@@ -281,8 +234,8 @@ async function loadRadar(){
     document.getElementById('radarMeta').textContent = `${r.count} networks · ${r.summary.avoid} avoid / ${r.summary.caution} caution / ${r.summary.connect} safe · ${new Date(r.scanned_at*1000).toLocaleTimeString()}`;
     if(!radarSel || !radarNets.some(n=>n.ssid===radarSel)) radarSel = (radarNets.find(n=>n.is_current)||radarNets[0])?.ssid;
     document.getElementById('radarList').innerHTML = radarNets.map(n=>
-      `<button data-ssid="${esc(n.ssid)}" class="rlink w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded px-2 py-1 flex justify-between gap-2">
-       <span><span style="color:${vColor(n.recommendation.verdict)}">●</span> ${esc(n.ssid)||'<i>hidden</i>'}${n.is_current?' <span class="text-sky-600">●</span>':''}${n.blocked?' <span class="text-red-600 font-bold">BLOCKED</span>':''}${n.virtual?' 🎭':''}</span>
+       `<button data-ssid="${esc(n.ssid)}" class="rlink w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded px-2 py-1 flex justify-between gap-2">
+       <span><span style="color:${vColor(n.recommendation.verdict)}">●</span> ${esc(n.ssid)||'<i>hidden</i>'}${n.is_current?' <span class="text-sky-600">●</span>':''}${n.blocked?' <span class="text-red-600 font-bold">BLOCKED</span>':''}</span>
        <span class="text-slate-500 text-xs">${n.score}/100 · ${n.signal_dbm??''} dBm</span></button>`).join('');
     document.querySelectorAll('.rlink').forEach(b=>b.onclick=()=>{ radarSel=b.dataset.ssid; renderRadarSel(); });
     renderRadarSel();
@@ -303,12 +256,8 @@ function renderRadarSel(){
 }
 // block / unblock / flag actions (buttons are rendered dynamically)
 document.addEventListener('click', async ev=>{
-  const b = ev.target.closest('[data-block],[data-unblock],[data-flag],[data-demostop]');
+  const b = ev.target.closest('[data-block],[data-unblock],[data-flag]');
   if(!b) return;
-  if(b.dataset.demostop){
-    await api('/api/demo/attack/stop',{method:'POST'});
-    refreshDemo(); loadRadar();
-  }
   if(b.dataset.block){
     if(!confirm(`Block "${b.dataset.block}"? Your Mac will forget it and won't auto-join it again.`)) return;
     b.textContent = 'Blocking…';
@@ -361,32 +310,10 @@ async function refreshAI(){
   }).join('');
 }
 
-// ---------- link vitals (top-right tiles) ----------
-const fmtDur = s => { if(s==null) return '–'; s=Math.floor(s); const h=Math.floor(s/3600), m=Math.floor(s%3600/60); return h?`${h}h ${m}m`:`${m}m`; };
-async function refreshLink(){
-  let d;
-  try{ d = await api('/api/real/link'); }catch(e){ return; }
-  document.getElementById('stSpeed').textContent = d.speed_mbps!=null ? d.speed_mbps + ' Mbps' : '–';
-  const parts = [];
-  if(d.gateway_ms!=null) parts.push(`GW ${d.gateway_ms.toFixed(0)}ms`);
-  if(d.internet_ms!=null) parts.push(`${d.internet_ms.toFixed(0)}ms`);
-  document.getElementById('stPing').textContent = parts.join(' · ') || (d.internet_ok ? 'ok' : '–');
-  document.getElementById('stUp').textContent = fmtDur(d.connected_for_s);
-}
-document.getElementById('btnSpeed').onclick = async ev => {
-  const b = ev.currentTarget; b.textContent='…'; b.disabled=true;
-  document.getElementById('stSpeed').textContent = 'testing…';
-  await api('/api/real/speedtest',{method:'POST'});
-  await refreshLink(); b.textContent='↻'; b.disabled=false;
-};
-
 refreshLive(); setInterval(refreshLive, 8000);
 refreshLan();
 loadRadar(); setInterval(loadRadar, 12000); drawRadar();
 refreshAI(); setInterval(refreshAI, 10000);
-refreshDemo(); setInterval(refreshDemo, 4000);
-refreshLink(); setInterval(refreshLink, 20000);
-setTimeout(async ()=>{ await api('/api/real/speedtest',{method:'POST'}); refreshLink(); }, 3000);
 </script>
 </body>
 </html>

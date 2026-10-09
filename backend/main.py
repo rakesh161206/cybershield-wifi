@@ -18,8 +18,7 @@ from backend import database as db
 from backend import real_net
 from backend import threat_model
 from backend import policy
-from backend import attacker
-from backend.simulator import NORMAL_DEVICES, DECOYS, ALLOW_LIST, DENY_LIST, fresh_device_state, attack_sequence
+from backend.simulator import NORMAL_DEVICES, DECOYS, ALLOW_LIST, DENY_LIST, fresh_device_state
 
 app = FastAPI(title="CyberShield Wi-Fi")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -34,9 +33,6 @@ if not db.get_devices():
     db.log_event("SYSTEM", "boot", "CyberShield initialized. 4 devices authenticated. 4 decoys armed.", 0)
 
 # ---- models ----
-class AttackReq(BaseModel):
-    device_id: str = "DEVICE-007"
-
 class DecoyTouch(BaseModel):
     device_id: str = "DEVICE-007"
     decoy_id: str = "FAKE-ADMIN"
@@ -130,31 +126,6 @@ def stats():
         "incidents": len(db.get_incidents(1000)),
     }
 
-@app.post("/api/simulate/attack")
-def simulate_attack(req: AttackReq):
-    dev = db.get_device(req.device_id)
-    if not dev:
-        return {"error": "unknown device"}
-    steps = attack_sequence(req.device_id)
-    # accumulate all features at once for decisive demo, but log each step
-    merged = {}
-    for s in steps:
-        db.log_event(req.device_id, s["type"], s["detail"], 0)
-        for k, v in s["features"].items():
-            if isinstance(v, bool):
-                merged[k] = True
-            elif isinstance(v, int):
-                merged[k] = max(merged.get(k, 0), v) if k in ("auth_failures", "decoy_interactions", "unauthorized_attempts") else v
-            else:
-                merged[k] = v
-        if s["type"] == "decoy":
-            db.log_decoy_hit(req.device_id, "FAKE-ADMIN")
-            db.log_decoy_hit(req.device_id, "FAKE-NAS")
-    risk, reasons, level, ai, prev = apply_features_to_device(dev, merged)
-    isolated = auto_respond_if_needed(dev, reasons)
-    return {"device": db.get_device(req.device_id), "risk": risk, "reasons": reasons,
-            "level": level, "ai": ai, "isolated": isolated, "steps": steps}
-
 @app.post("/api/simulate/normal")
 def simulate_normal():
     db.clear_dynamic()
@@ -219,9 +190,6 @@ def real_radar():
     st = real_net.full_status()
     ssid = (st.get("wifi") or {}).get("ssid", "")
     nearby = real_net.get_nearby(ssid)
-    twin = attacker.virtual_network(nearby)
-    if twin:
-        nearby = nearby + [twin]
     nets = threat_model.assess(nearby)
     pending = policy.evaluate_pending(nets)
     # refresh blocked flags after enforcement
@@ -241,9 +209,6 @@ class FlagReq(BaseModel):
     ip: str = ""
     mac: str = ""
     note: str = "flagged by admin"
-
-class AttackReq2(BaseModel):
-    target_ssid: str = ""
 
 @app.post("/api/real/block")
 def block_network(req: SsidReq):
@@ -286,30 +251,6 @@ def real_link():
 def real_speedtest():
     mbps = real_net.speed_test()
     return {"speed_mbps": mbps, "ok": mbps is not None}
-
-@app.get("/api/demo/attack")
-def demo_status():
-    return attacker.status()
-
-@app.post("/api/demo/attack/start")
-def demo_start(req: AttackReq2):
-    st = real_net.full_status()
-    target = req.target_ssid or (st.get("wifi") or {}).get("ssid", "")
-    s = attacker.start(target)
-    db.log_event("DEMO", "attack-start",
-                 f"Virtual attacker {attacker.PROFILE['id']} targeting “{target}” (simulated)", 0)
-    return s
-
-@app.post("/api/demo/attack/stop")
-def demo_stop():
-    twin = attacker.status()
-    target = twin.get("target", "")
-    s = attacker.stop("blocked")
-    db.add_incident("DEMO", 95, "Evil twin neutralized by admin",
-                    f"Twin of “{target}” blocked — scenario contained (simulated)")
-    db.log_event("DEMO", "attack-stop",
-                 f"Twin of “{target}” blocked by admin — threat neutralized (simulated)", 0)
-    return s
 
 @app.post("/api/real/device/flag")
 def flag_device(req: FlagReq):

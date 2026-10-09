@@ -34,14 +34,3 @@ def fresh_device_state(dev: dict) -> dict:
         "unknown_dest": 0, "request_anomaly": 0, "unauthorized": 0,
         "isolated": 0,
     }
-
-
-def attack_sequence(device_id: str = "DEVICE-007"):
-    """Ordered steps shown in demo timeline."""
-    return [
-        {"type": "recon", "detail": f"{device_id}: scanning 24 ports...", "features": {"port_scan": True}},
-        {"type": "traffic", "detail": f"{device_id}: traffic spike 12x baseline", "features": {"traffic_spike": True, "request_rate_anomaly": True}},
-        {"type": "c2", "detail": f"{device_id}: connection to unknown external IP 185.220.x.x", "features": {"unknown_destinations": True}},
-        {"type": "auth", "detail": f"{device_id}: 7 failed logins to admin panel", "features": {"auth_failures": 7, "unauthorized_attempts": 3}},
-        {"type": "decoy", "detail": f"{device_id}: touched FAKE-ADMIN + FAKE-NAS 🍯", "features": {"decoy_interactions": 2}},
-    ]

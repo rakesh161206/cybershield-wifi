@@ -26,15 +26,12 @@ uvicorn main:app --reload --port 8000
 # open http://127.0.0.1:8000
 ```
 
-## Demo (2–3 min)
-1. Show dashboard: all TRUSTED, trust ~92.
-2. Click **SIMULATE WI-FI ATTACK** (target DEVICE-007).
-3. Watch timeline: port scan → traffic spike → unknown IP → auth failures → 🍯 decoy touch.
-4. Risk → 90+/100  CRITICAL → banner `AUTOMATICALLY ISOLATED` + incident with reasons + actions.
-5. Click Restore, or show manual Isolate.
+## Demo
+1. Open the dashboard to see live risk, protocol checks, and radar.
+2. Click any radar blip or list row for verdict + threat analysis.
+3. Block / Allow networks from radar, flag LAN devices, Deep scan the LAN.
 
 ## API (simulated Zero-Trust demo)- `GET /api/devices /api/stats /api/events /api/incidents /api/decoys`
-- `POST /api/simulate/attack {"device_id":"DEVICE-007"}`
 - `POST /api/simulate/normal`
 - `POST /api/device/{id}/allow | /isolate`
 - `GET /api/decoy/{decoy_id}?device_id=DEVICE-007` (touching a decoy logs a high-confidence signal)
