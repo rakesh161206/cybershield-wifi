@@ -42,7 +42,7 @@ button{min-height:40px}
         <button id="btnDisconnect" title="Emergency: turn Wi-Fi off" class="bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded text-xs font-bold">Disconnect Wi-Fi</button>
       </div>
     </div>
-    <div id="liveCards" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3"></div>
+    <div id="liveCards" class="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm mb-3"></div>
     <h3 class="font-bold text-sm mb-1">Selected network — click any radar blip or list row</h3>
     <div id="radarDetail" class="text-sm bg-slate-50 border border-slate-200 rounded p-3 mb-4 max-h-[60vh] overflow-y-auto"><span class="text-slate-400">Select a network ↑</span></div>
 
@@ -154,6 +154,7 @@ async function refreshLive(){
     ['Security', `<b>${esc(w.security||'–')}</b>${w.band?` · ${esc(w.band)}`:''}${w.channel?` · ch ${esc(w.channel)}`:''}`],
     ['Signal', `<b>${sig}</b>${w.rate_mbps?` · ${w.rate_mbps} Mbps`:''}${w.phy?` · ${esc(w.phy)}`:''}`],
     ['IP / Gateway', `<span class="mono">${esc(ip.ip||'–')}</span> → <span class="mono">${esc(ip.gateway||'–')}</span>${s.gateway_ms!=null?` · ${s.gateway_ms.toFixed(1)} ms`:''}`],
+    ['MAC', `<span class="mono">${esc(w.mac||'n/a')}</span>`],
   ].map(([k,v])=>`<div class="bg-slate-50 border border-slate-200 rounded p-2"><div class="text-xs text-slate-500">${k}</div><div>${v}</div></div>`).join('');
   document.getElementById('liveChecks').innerHTML = s.checks.map(c=>
     `<tr class="border-t border-slate-200"><td class="p-2" data-l="Check">${esc(c.name)}</td><td class="p-2" data-l="Result">${chkIcon(c.status)} ${c.status.toUpperCase()}</td><td class="p-2 text-slate-600" data-l="Detail">${esc(c.detail)}</td></tr>`).join('');
