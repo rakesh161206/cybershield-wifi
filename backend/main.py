@@ -235,7 +235,7 @@ class FlagReq(BaseModel):
 
 
 class CaptureReq(BaseModel):
-    interface: str = "en0"
+    interface: str = ""
     duration_s: int = 10
     max_packets: int = 500
     filter: str = ""
@@ -446,14 +446,15 @@ def capture_status():
 
 @app.post("/api/real/capture/start")
 def capture_start(req: CaptureReq):
-    res = packet_monitor.start_capture(interface=req.interface or "en0",
+    res = packet_monitor.start_capture(interface=req.interface or "",
                                        duration_s=req.duration_s,
                                        max_packets=req.max_packets,
                                        pcap_filter=req.filter or "")
     if not res.get("ok"):
         raise HTTPException(status_code=400, detail=res.get("detail", "capture failed"))
+    iface = (res.get("capture") or {}).get("interface", req.interface or "auto")
     db.log_event("ADMIN", "capture-start",
-                 f"Packet capture started on {req.interface} "
+                 f"Packet capture started on {iface} "
                  f"({req.duration_s}s, max {req.max_packets} pkts, headers only)", 0)
     return res
 

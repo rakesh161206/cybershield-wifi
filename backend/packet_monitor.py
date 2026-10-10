@@ -16,12 +16,17 @@ What it deliberately does NOT do:
 """
 
 import os
+import platform
 import re
 import shlex
 import shutil
 import subprocess
 import tempfile
 import time
+
+IS_WIN = platform.system() == "Windows"
+IS_MAC = platform.system() == "Darwin"
+IS_LINUX = platform.system() == "Linux"
 
 # ---------------- tuning ----------------
 LOSS_TTL = 60          # seconds to reuse a gateway loss probe
@@ -52,19 +57,74 @@ def _run(cmd, timeout=10):
 
 def _default_gateway():
     """Best-effort default gateway without importing real_net (avoids cycles)."""
-    out = _run(["route", "-n", "get", "default"], timeout=5)
-    m = re.search(r"gateway:\s*(\S+)", out)
-    return m.group(1) if m else ""
+    if IS_MAC:
+        out = _run(["route", "-n", "get", "default"], timeout=5)
+        m = re.search(r"gateway:\s*(\S+)", out)
+        if m:
+            return m.group(1)
+    elif IS_LINUX:
+        out = _run(["ip", "route", "show", "default"], timeout=5)
+        m = re.search(r"^default\s+via\s+(\S+)", out, re.M)
+        if m:
+            return m.group(1)
+        out = _run(["route", "-n"], timeout=5)
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[0] in ("0.0.0.0", "default") \
+                    and re.match(r"^\d+\.\d+\.\d+\.\d+$", parts[1]):
+                return parts[1]
+    elif IS_WIN:
+        out = _run(["route", "print", "-4"], timeout=8)
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 3 and parts[0] == "0.0.0.0" \
+                    and re.match(r"^\d+\.\d+\.\d+\.\d+$", parts[2]):
+                return parts[2]
+    return ""
+
+
+def _ping_cmd(target: str, count: int):
+    count = max(1, min(int(count or 5), 10))
+    if IS_WIN:
+        return ["ping", "-n", str(count), "-w", "2000", target]
+    if IS_LINUX:
+        return ["ping", "-c", str(count), "-W", "2", target]
+    return ["ping", f"-c{count}", target]
+
+
+def _default_iface() -> str:
+    """Primary wireless interface name for captures (best-effort)."""
+    if IS_MAC:
+        return "en0"
+    if IS_LINUX:
+        out = _run(["iw", "dev"], timeout=5)
+        m = re.search(r"Interface\s+(\S+)", out)
+        if m:
+            return m.group(1)
+        out = _run(["ip", "route", "show", "default"], timeout=5)
+        m = re.search(r"\bdev\s+(\S+)", out)
+        if m:
+            return m.group(1)
+        return "wlan0"
+    if IS_WIN:
+        return "Wi-Fi"
+    return "en0"
 
 
 # ---------------- loss probe ----------------
 def _parse_ping(out):
-    """Parse BSD + Linux ping summaries. Returns (sent, received, loss, avg, min, max)."""
+    """Parse BSD, Linux, and Windows ping summaries.
+
+    Returns (sent, received, loss, avg, min, max).
+    """
     sent = received = None
     loss = None
     m = re.search(r"(\d+)\s+packets transmitted[^\n]*?(\d+)\s*(?:packets? received|received)", out)
     if m:
         sent, received = int(m.group(1)), int(m.group(2))
+    m = re.search(r"Packets:\s*Sent\s*=\s*(\d+),\s*Received\s*=\s*(\d+),\s*Lost\s*=\s*\d+\s*\((\d+(?:\.\d+)?)% loss\)", out)  # Windows
+    if m:
+        sent, received, loss = int(m.group(1)), int(m.group(2)), float(m.group(3))
     m = re.search(r"(\d+(?:\.\d+)?)\s*%\s*packet loss", out)
     if m:
         loss = float(m.group(1))
@@ -72,6 +132,9 @@ def _parse_ping(out):
     m = re.search(r"(?:round-trip|rtt)[^\n=]*=\s*([\d.]+)/([\d.]+)/([\d.]+)", out)
     if m:
         mn, avg, mx = float(m.group(1)), float(m.group(2)), float(m.group(3))
+    m = re.search(r"Minimum\s*=\s*(\d+)\s*ms,\s*Maximum\s*=\s*(\d+)\s*ms,\s*Average\s*=\s*(\d+)\s*ms", out)  # Windows
+    if m:
+        mn, mx, avg = float(m.group(1)), float(m.group(2)), float(m.group(3))
     if sent is not None and received is not None and loss is None:
         loss = round((sent - received) * 100.0 / sent, 1) if sent else 0.0
     return sent, received, loss, avg, mn, mx
@@ -96,7 +159,7 @@ def measure_loss(host=None, count=5, force=False):
                 "ok": False, "detail": "no default gateway found",
                 "measured_at": now, "cached": False, "age_s": 0}
     count = max(1, min(int(count or 5), 10))
-    out = _run(["ping", f"-c{count}", target], timeout=count * 2 + 6)
+    out = _run(_ping_cmd(target, count), timeout=count * 3 + 8)
     sent, received, loss, avg, mn, mx = _parse_ping(out)
     if sent is None:
         payload = {"target": target, "sent": 0, "received": 0, "loss_pct": None,
@@ -124,11 +187,32 @@ def last_loss():
 
 # ---------------- flow metadata (headers/counters only) ----------------
 def _tcp_table():
-    for cmd in (["netstat", "-an", "-p", "tcp"], ["netstat", "-an", "-t"], ["ss", "-tan"]):
+    if IS_WIN:
+        cmds = (["netstat", "-an", "-p", "TCP"], ["netstat", "-an"])
+    else:
+        cmds = (["netstat", "-an", "-p", "tcp"], ["netstat", "-an", "-t"], ["ss", "-tan"])
+    for cmd in cmds:
         out = _run(cmd, timeout=6)
-        if out and ("ESTABLISHED" in out or "tcp" in out.lower()):
+        if out and ("ESTABLISHED" in out or "ESTAB" in out or "tcp" in out.lower()):
             return out
     return ""
+
+
+def _peer_ip(token: str) -> str:
+    """Strip the port from a local/foreign address token (v4, v6, Win/Mac)."""
+    t = (token or "").strip()
+    if not t or t in ("*:*", "*"):
+        return ""
+    m = re.match(r"^\[(.+)\](?::\d+)?$", t)  # bracketed IPv6, e.g. [::1]:443
+    if m:
+        t = m.group(1)
+    else:
+        # port follows the last dot (BSD: 1.2.3.4.443) or colon (1.2.3.4:443, ::1:443)
+        t = re.split(r"[.:](?=\d+$)", t)[0]
+    t = t.strip("[] ")
+    if not t or not t.strip(":") or t == "*":
+        return ""
+    return t
 
 
 def _flow_counts():
@@ -139,17 +223,22 @@ def _flow_counts():
     if table:
         for line in table.splitlines():
             up = line.upper()
-            if "UDP" in up:
+            parts = line.split()
+            if not parts:
+                continue
+            proto = parts[0].upper()
+            if proto.startswith("UDP"):
                 udp += 1
+                continue
+            if not proto.startswith("TCP"):
                 continue
             if "ESTABLISHED" in up or "ESTAB" in up:
                 est += 1
-            parts = line.split()
-            if len(parts) >= 5 and ("." in parts[4] or ":" in parts[4]):
-                peer = parts[4].rsplit(".", 1)[0] if "." in parts[4] else parts[4]
-                peer = peer.strip("[]")
-                if peer and peer != "*":
-                    remotes.add(peer)
+            # Unix has 6+ cols (foreign at [4]); Windows has 4 (foreign at [2])
+            foreign = parts[4] if len(parts) >= 5 else (parts[2] if len(parts) >= 3 else "")
+            peer = _peer_ip(foreign)
+            if peer:
+                remotes.add(peer)
     return est, udp, remotes
 
 
@@ -365,7 +454,7 @@ def capture_status():
 
 
 def _valid_iface(iface):
-    return bool(re.fullmatch(r"[A-Za-z0-9._-]{1,16}", iface or ""))
+    return bool(re.fullmatch(r"[A-Za-z0-9._-]{1,32}", iface or ""))
 
 
 def _valid_filter(f):
@@ -376,13 +465,16 @@ def _valid_filter(f):
     return True
 
 
-def start_capture(interface="en0", duration_s=DEFAULT_DURATION_S,
+def start_capture(interface="", duration_s=DEFAULT_DURATION_S,
                   max_packets=DEFAULT_PACKETS, pcap_filter=""):
     _expire_captures()
     if not tcpdump_available():
         return {"ok": False,
-                "detail": "tcpdump is not installed. Install it (macOS: brew install tcpdump) "
-                          "and grant terminal packet-capture permission; loss/flow metrics still work."}
+                "detail": "tcpdump is not installed (macOS: brew install tcpdump; "
+                          "Debian/Ubuntu: sudo apt install tcpdump; "
+                          "Windows: Npcap plus WinDump or Wireshark's tshark). "
+                          "Loss and flow metrics still work without it."}
+    interface = interface or _default_iface()
     if not _valid_iface(interface):
         return {"ok": False, "detail": "invalid interface name"}
     if not _valid_filter(pcap_filter or ""):
@@ -408,7 +500,8 @@ def start_capture(interface="en0", duration_s=DEFAULT_DURATION_S,
     except PermissionError:
         return {"ok": False,
                 "detail": "tcpdump needs packet-capture permission "
-                          "(macOS may require sudo or a developer-tools prompt)."}
+                          "(Linux: sudo or CAP_NET_RAW; macOS: sudo or a developer-tools "
+                          "prompt; Windows: Npcap installed with WinPcap-compatible mode)."}
     except Exception as e:
         return {"ok": False, "detail": f"could not start tcpdump: {e.__class__.__name__}"}
     time.sleep(0.4)

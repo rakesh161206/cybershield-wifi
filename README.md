@@ -11,7 +11,10 @@ Standard Wi-Fi clients trust a network after authentication and rarely re-evalua
 ## 2. System Architecture
 
 ```
-macOS collectors (system_profiler, networksetup, ipconfig, arp, ping, netstat, tcpdump*)
+Host collectors, per OS (stdlib only; first working source wins):
+  macOS:   system_profiler, networksetup, ipconfig, route, scutil, arp, ping
+  Linux:   iw, nmcli, ip route, /etc/resolv.conf, arp, ping
+  Windows: netsh wlan, route print, ipconfig, arp, ping
         |
         v
 real_net.py (link state, nearby networks, IP/gateway/DNS, LAN census)
@@ -36,7 +39,7 @@ Components:
 
 - `backend/real_net.py`: live collectors. Wi-Fi link (SSID, BSSID, channel, band, PHY mode, rate, security, RSSI/noise), nearby networks, IP/gateway/DNS, gateway/DNS latency, captive-portal and TLS checks, LAN device census via ARP (fast) and ping sweep (full). All collectors are best-effort with graceful degradation and short TTL caches.
 - `backend/packet_monitor.py`: gateway loss/latency probes (cached ICMP bursts), flow metadata from socket and interface counters (TCP connections, destination diversity, packet rate, retransmission counters), and bounded header-truncated tcpdump captures with automatic expiry. Headers and counters only, never payloads.
-- `backend/policy.py`: deterministic network scoring and macOS enforcement (`networksetup` forget, allowlist, Wi-Fi power off).
+- `backend/policy.py`: deterministic network scoring and enforcement (forget saved network, allowlist, Wi-Fi power off) via `networksetup` (macOS), `nmcli` (Linux), or `netsh` (Windows).
 - `backend/threat_model.py`: RSSI-to-proximity mapping and a defensive threat catalog keyed by security class.
 - `backend/rogue.py`: per-SSID fingerprint history with warnings for new networks, security mismatches, duplicate channel/security variants, and strong open signals. Every warning is labeled a risk indicator, not proof.
 - `backend/diagnosis.py`: attack-versus-fault classifier combining signal quality, loss/latency, security posture, rogue warnings, AI assessment, and radar verdicts into healthy, network_fault, suspected_attack, mixed, or degraded_unknown, with cited evidence and a recommended action.
@@ -125,9 +128,9 @@ When scikit-learn is absent, the engine reports `rules` mode and flags a snapsho
 ## 6. Enforcement Policy
 Enforcement is ask-first. Radar scans return `pending_blocks` (networks scored `avoid` that are neither blocked nor allowed). The dashboard presents Block and Allow actions for each. No network is forgotten without explicit confirmation.
 
-macOS actions (no elevated privileges required):
+Per-OS actions (no elevated privileges required for the common cases):
 
-- Block: remove the SSID from the preferred-network list so the host will not auto-join it, and record it in the blocklist.
+- Block: delete the saved network so the host will not auto-join it (`networksetup` on macOS, `nmcli connection delete` on Linux, `netsh wlan delete profile` on Windows), and record the SSID in the blocklist. If the platform tool is missing, the API says so instead of pretending.
 - Allow: record the SSID in the allowlist; auto-protect will not propose it again.
 - Disconnect: turn Wi-Fi off. Manual and confirmed only; never invoked automatically.
 - LAN flag: record an IP/MAC pair as flagged. The host cannot isolate third-party LAN devices; the API response directs the operator to apply a MAC filter on the router.
@@ -200,7 +203,24 @@ Packet, rogue, diagnosis, and timeline:
 
 ## 11. Usage
 
-Requirements: macOS for full live collectors (Linux and other hosts return degraded `unavailable` fields), Python 3 with pip, Node 18+ for the npm scripts. tcpdump is optional and only needed for the capture panel.
+Requirements: Windows 10/11, macOS, or Linux with Python 3.12+, plus pip. Node 18+ only needed for the npm scripts. tcpdump is optional and only needed for the capture panel.
+
+macOS or Linux:
+
+```bash
+cd cybershield-wifi
+./run.sh
+# open http://127.0.0.1:8000
+```
+
+Windows (Command Prompt or PowerShell):
+
+```bat
+cd cybershield-wifi
+run.bat
+```
+
+npm alternative (any OS):
 
 ```bash
 cd cybershield-wifi
@@ -218,27 +238,34 @@ pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
-Optional capture setup (macOS):
+Linux notes: Wi-Fi details need `iw` and NetworkManager (`nmcli`); Debian/Ubuntu: `sudo apt install iw network-manager`. Nearby scans use cached results (`--rescan no`) to stay fast.
+
+Windows notes: Wi-Fi details come from `netsh wlan` (built in). Disabling Wi-Fi may need the exact interface name or administrator rights; the API reports either case.
+
+Optional capture setup:
 
 ```bash
+# macOS
 brew install tcpdump
-# Capturing on en0 may prompt for permission or require sudo.
-# Without it, the capture panel reports unavailable while all
-# other features keep working.
+# Debian/Ubuntu
+sudo apt install tcpdump
+# Windows: install Npcap, plus WinDump or Wireshark (tshark)
 ```
+
+Capturing may require elevated permission (sudo, a macOS developer-tools prompt, or Npcap in WinPcap-compatible mode). Without it, the capture panel reports unavailable while all other features keep working.
 
 Standard workflow: inspect the live connection panel and protocol checks, review packet loss and flow telemetry, review the radar verdicts with rogue warnings and the diagnosis, open a network for its threat analysis, block or allow high-risk networks as appropriate, use deep scan plus device flagging to review LAN membership, and use the timeline with before/after verification to confirm an action helped.
 
 ## 12. Limitations
 
 - Proximity is an RSSI heuristic affected by walls, orientation, and transmit power; it is not ranging.
-- Nearby-network visibility depends on `system_profiler` output and inherits its latency and completeness limits.
+- Nearby-network visibility depends on the platform scanner (`system_profiler` on macOS, `nmcli` cache on Linux, `netsh` on Windows) and inherits its latency and completeness limits.
 - LAN sweeps observe only hosts that respond to ARP or ping; silent or client-isolated hosts are missed.
 - Blocking prevents future auto-joins but does not disconnect the current session and does not affect other devices.
 - The anomaly detectors are trained on synthetic normal baselines, not on the operator's own environment; treat AI output as corroboration, not ground truth.
 - Rogue warnings and diagnosis verdicts are heuristic indicators. Identical signals follow legitimate router changes, congestion, and weak coverage; confirm with the network owner before acting.
-- Packet capture requires a local tcpdump binary with capture permission and is unavailable in sandboxed or serverless deployments (notably Vercel, which also lacks `system_profiler`, `networksetup`, ARP, and raw ICMP). Captures never leave the host except through explicit download and expire after 15 minutes.
-- Live collection is macOS-specific; other platforms operate in degraded mode.
+- Packet capture requires a local tcpdump binary with capture permission and is unavailable in sandboxed or serverless deployments (notably Vercel, which also lacks Wi-Fi scanners, ARP, and raw ICMP). Captures never leave the host except through explicit download and expire after 15 minutes.
+- On hosts without Wi-Fi hardware or scanner tools, link and radar fields report unavailable while scoring, AI, timeline, and audit features keep working.
 
 ## 13. Repository Structure
 
@@ -246,7 +273,7 @@ Standard workflow: inspect the live connection panel and protocol checks, review
 cybershield-wifi/
   backend/
     main.py          FastAPI routes and device-risk helpers
-    real_net.py      live macOS collectors and LAN census
+    real_net.py      cross-platform collectors (Wi-Fi, IP, LAN census)
     packet_monitor.py gateway loss probes, flow metadata, bounded capture
     rogue.py         SSID history and rogue-AP change warnings
     diagnosis.py     attack-versus-fault classification
@@ -259,5 +286,6 @@ cybershield-wifi/
   frontend/
     index.html       dashboard (live, radar, LAN, AI, packet, timeline)
   package.json       npm scripts (start, dev, health)
-  run.sh             backend-only launch script
+  run.sh             launcher for macOS and Linux
+  run.bat            launcher for Windows
 ```

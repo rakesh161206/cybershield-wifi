@@ -1,17 +1,30 @@
-"""Live host-network collectors (macOS, stdlib only, best-effort).
+"""Live host-network collectors (Windows, macOS, and Linux; stdlib only).
 
-Sources: system_profiler (Wi-Fi link + nearby networks), ipconfig/route
-(IP/gateway), scutil (DNS), ping + TCP + captive-portal check (health),
+Per-OS sources (all best-effort, first working source wins):
+  macOS:   system_profiler (Wi-Fi link + nearby), ipconfig/route (IP/gateway),
+           scutil (DNS), networksetup (preferred networks, in policy.py)
+  Linux:   iw + nmcli (Wi-Fi link + nearby), ip route (gateway),
+           /etc/resolv.conf (DNS)
+  Windows: netsh wlan (Wi-Fi link + nearby), route print (gateway),
+           ipconfig /all (DNS, DHCP lease)
+
+Common: socket-based IP/DNS/TCP checks, ping + captive-portal health,
 arp + ping sweep (LAN devices). Everything degrades gracefully to
-'unavailable' when a source is missing (e.g. non-macOS, no Wi-Fi).
+'unavailable' when a source is missing (no Wi-Fi, missing tool, sandbox).
 """
 import json
+import platform
 import re
+import shutil
 import socket
 import subprocess
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+IS_WIN = platform.system() == "Windows"
+IS_MAC = platform.system() == "Darwin"
+IS_LINUX = platform.system() == "Linux"
 
 STATUS_TTL = 10          # seconds to cache /api/real/status
 _devices_cache = {"ts": 0, "devices": [], "mode": ""}
@@ -26,6 +39,24 @@ def _run(cmd, timeout=8):
         return ""
 
 
+def _have(tool: str) -> bool:
+    return bool(shutil.which(tool))
+
+
+def _ping_cmd(host: str, count=2, timeout=3):
+    """Platform-appropriate ping argv (no shell)."""
+    count = max(1, int(count))
+    if IS_WIN:
+        return ["ping", "-n", str(count), "-w", str(int(timeout * 1000)), host]
+    if IS_LINUX:
+        return ["ping", "-c", str(count), "-W", str(max(1, int(timeout))), host]
+    return ["ping", f"-c{count}", f"-t{int(timeout)}", host]
+
+
+def _ping_timeout(count=2, timeout=3):
+    return int(count) * (int(timeout) if not IS_WIN else max(1, int(timeout))) + 8
+
+
 # ---------- Wi-Fi ----------
 SEC_LABELS = [
     ("wpa3", "WPA3"),
@@ -36,8 +67,9 @@ SEC_LABELS = [
 
 def _sec_label(raw: str) -> str:
     s = (raw or "").lower()
-    if not s or "none" in s or s.endswith("_open") or "open" in s and "wpa" not in s:
-        # profiler uses e.g. 'spairport_security_mode_none' for open
+    if not s or not s.strip("- ") or "none" in s or s.endswith("_open") or "open" in s and "wpa" not in s:
+        # profiler uses e.g. 'spairport_security_mode_none' for open;
+        # nmcli shows '--'/empty for open networks
         if "wpa" in s or "wep" in s:
             pass
         else:
@@ -61,25 +93,231 @@ def _profiler() -> dict:
     now = _t.time()
     if _prof_cache["data"] and now - _prof_cache["ts"] < PROF_TTL:
         return _prof_cache["data"]
-    out = _run(["system_profiler", "SPAirPortDataType", "-json"], timeout=15)
     iface = {}
-    try:
-        data = json.loads(out)
-        ifs = data.get("SPAirPortDataType", [{}])[0].get("spairport_airport_interfaces", [])
-        for i in ifs:
-            if i.get("_name") == "en0":
-                iface = i
-                break
-        else:
-            iface = ifs[0] if ifs else {}
-    except Exception:
-        iface = {}
+    if IS_MAC:
+        out = _run(["system_profiler", "SPAirPortDataType", "-json"], timeout=15)
+        try:
+            data = json.loads(out)
+            ifs = data.get("SPAirPortDataType", [{}])[0].get("spairport_airport_interfaces", [])
+            for i in ifs:
+                if i.get("_name") == "en0":
+                    iface = i
+                    break
+            else:
+                iface = ifs[0] if ifs else {}
+        except Exception:
+            iface = {}
     _prof_cache["ts"] = now
     _prof_cache["data"] = iface
     return iface
 
 
+# ---------- cross-platform Wi-Fi (Linux iw/nmcli, Windows netsh) ----------
+def _pct_to_dbm(pct) -> int | None:
+    try:
+        return int(float(pct) / 2) - 100
+    except (TypeError, ValueError):
+        return None
+
+
+def _sort_nets(out: list) -> list:
+    out.sort(key=lambda x: (x["signal_dbm"] is None, -(x["signal_dbm"] or -999)))
+    return out
+
+
+def _nmcli_split(line: str) -> list:
+    return [p.replace("\\:", ":") for p in re.split(r"(?<!\\):", line.rstrip("\n"))]
+
+
+def _parse_iw_link(text: str) -> dict:
+    """Parse `iw dev <iface> link` output. Pure function (unit-testable)."""
+    m = re.search(r"^\s*SSID:\s*(.+?)\s*$", text, re.M)
+    if not m:
+        return {"connected": False}
+    out = {"connected": True, "ssid": m.group(1)}
+    m = re.search(r"signal:\s*(-?\d+)\s*dBm", text)
+    out["signal_dbm"] = int(m.group(1)) if m else None
+    m = re.search(r"tx bitrate:\s*([\d.]+)", text)
+    out["rate_mbps"] = float(m.group(1)) if m else None
+    m = re.search(r"freq:\s*(\d+)", text)
+    freq = int(m.group(1)) if m else 0
+    out["band"] = "2.4GHz" if freq and freq < 3000 else ("5GHz" if freq else "")
+    return out
+
+
+def _parse_nmcli_scan(text: str) -> list:
+    """Parse `nmcli -t -f IN-USE,SSID,SIGNAL,CHAN,SECURITY dev wifi list`.
+
+    Returns [{ssid, in_use, signal_dbm, channel, security_raw}] (pure function).
+    """
+    rows = []
+    for line in (text or "").splitlines():
+        if not line.strip():
+            continue
+        parts = _nmcli_split(line)
+        if len(parts) < 5:
+            continue
+        in_use = parts[0].strip()
+        sec = parts[-1].strip()
+        chan = parts[-2].strip()
+        sig = parts[-3].strip()
+        ssid = ":".join(parts[1:-3]).strip()
+        if not ssid:
+            continue
+        rows.append({"ssid": ssid, "in_use": in_use == "*",
+                     "signal_dbm": _pct_to_dbm(sig),
+                     "channel": chan if chan.isdigit() else "",
+                     "security_raw": sec})
+    return rows
+
+
+def _linux_wifi_iface() -> str:
+    out = _run(["iw", "dev"], timeout=5)
+    m = re.search(r"Interface\s+(\S+)", out)
+    if m:
+        return m.group(1)
+    out = _run(["nmcli", "-t", "-f", "DEVICE,TYPE", "device", "status"], timeout=8)
+    for line in out.splitlines():
+        parts = _nmcli_split(line)
+        if len(parts) >= 2 and parts[1].strip() == "wifi" and parts[0].strip() not in ("lo", ""):
+            return parts[0].strip()
+    return ""
+
+
+def _linux_wifi() -> dict:
+    iface = _linux_wifi_iface()
+    if not iface:
+        return {"connected": False}
+    link = _parse_iw_link(_run(["iw", "dev", iface, "link"], timeout=6))
+    if not link.get("connected"):
+        return {"connected": False}
+    scan = _run(["nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,CHAN,SECURITY",
+                 "device", "wifi", "list", "--rescan", "no"], timeout=15)
+    row = next((r for r in _parse_nmcli_scan(scan) if r["ssid"] == link["ssid"] and r["in_use"]),
+               next((r for r in _parse_nmcli_scan(scan) if r["ssid"] == link["ssid"]), None))
+    mac = ""
+    try:
+        with open(f"/sys/class/net/{iface}/address") as f:
+            mac = f.read().strip()
+    except Exception:
+        pass
+    sec_raw = (row or {}).get("security_raw", "")
+    return {
+        "connected": True, "ssid": link["ssid"],
+        "channel": (row or {}).get("channel", ""),
+        "band": link.get("band", ""), "width": "", "phy": "",
+        "rate_mbps": link.get("rate_mbps"),
+        "security_raw": sec_raw, "security": _sec_label(sec_raw),
+        "signal_dbm": link.get("signal_dbm"),
+        "noise_dbm": None, "snr_db": None,
+        "mac": mac, "country": "",
+    }
+
+
+def _linux_nearby(current_ssid="") -> list:
+    scan = _run(["nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,CHAN,SECURITY",
+                 "device", "wifi", "list", "--rescan", "no"], timeout=15)
+    rows = _parse_nmcli_scan(scan)
+    if not rows:
+        return []
+    return _sort_nets([{
+        "ssid": r["ssid"], "signal_dbm": r["signal_dbm"],
+        "channel": r["channel"], "phy": "",
+        "security": _sec_label(r["security_raw"]),
+        "is_current": bool(current_ssid and r["ssid"] == current_ssid),
+    } for r in rows])
+
+
+def _parse_netsh_kv(text: str) -> dict:
+    """Parse `netsh wlan show interfaces` flat `Key : Value` output."""
+    kv = {}
+    for line in (text or "").splitlines():
+        m = re.match(r"^\s*([^:]+?)\s*:\s*(.*?)\s*$", line)
+        if m:
+            kv[m.group(1).strip().lower()] = m.group(2).strip()
+    return kv
+
+
+def _parse_netsh_networks(text: str) -> list:
+    """Parse `netsh wlan show networks mode=bssid` output (pure function)."""
+    nets, cur = [], None
+    for line in (text or "").splitlines():
+        m = re.match(r"^SSID \d+ : (.*)$", line)
+        if m:
+            if cur and cur.get("ssid"):
+                nets.append(cur)
+            cur = {"ssid": m.group(1).strip(), "signal_dbm": None,
+                   "channel": "", "phy": "", "security_raw": ""}
+            continue
+        if cur is None:
+            continue
+        m = re.match(r"^\s*Authentication\s*:\s*(.+?)\s*$", line)
+        if m:
+            cur["security_raw"] = m.group(1)
+            continue
+        m = re.match(r"^\s*Signal\s*:\s*(\d+)\s*%?\s*$", line)
+        if m and (cur["signal_dbm"] is None or _pct_to_dbm(m.group(1)) > cur["signal_dbm"]):
+            cur["signal_dbm"] = _pct_to_dbm(m.group(1))
+            continue
+        m = re.match(r"^\s*Channel\s*:\s*(\d+)", line)
+        if m and not cur["channel"]:
+            cur["channel"] = m.group(1)
+            continue
+        m = re.match(r"^\s*Radio type\s*:\s*(.+?)\s*$", line)
+        if m and not cur["phy"]:
+            cur["phy"] = m.group(1)
+    if cur and cur.get("ssid"):
+        nets.append(cur)
+    return [n for n in nets if n["ssid"]]
+
+
+def _win_wifi() -> dict:
+    kv = _parse_netsh_kv(_run(["netsh", "wlan", "show", "interfaces"], timeout=10))
+    ssid = kv.get("ssid", "")
+    if not ssid or kv.get("state", "").lower() != "connected":
+        return {"connected": False}
+    auth = kv.get("authentication", "")
+    rate = None
+    m = re.search(r"([\d.]+)", kv.get("transmit rate (mbps)", "") or kv.get("receive rate (mbps)", ""))
+    if m:
+        try:
+            rate = float(m.group(1))
+        except ValueError:
+            rate = None
+    return {
+        "connected": True, "ssid": ssid,
+        "channel": kv.get("channel", ""), "band": "",
+        "width": "", "phy": kv.get("radio type", ""),
+        "rate_mbps": rate,
+        "security_raw": auth, "security": _sec_label(auth),
+        "signal_dbm": _pct_to_dbm(re.search(r"(\d+)", kv.get("signal", "")).group(1)) if re.search(r"(\d+)", kv.get("signal", "")) else None,
+        "noise_dbm": None, "snr_db": None,
+        "mac": kv.get("physical address", ""), "country": "",
+        "bssid": kv.get("bssid", ""),
+    }
+
+
+def _win_nearby(current_ssid="") -> list:
+    nets = _parse_netsh_networks(_run(["netsh", "wlan", "show", "networks", "mode=bssid"], timeout=20))
+    if not nets:
+        return []
+    return _sort_nets([{
+        "ssid": n["ssid"], "signal_dbm": n["signal_dbm"],
+        "channel": n["channel"], "phy": n.get("phy", ""),
+        "security": _sec_label(n["security_raw"]),
+        "is_current": bool(current_ssid and n["ssid"] == current_ssid),
+    } for n in nets])
+
+
 def get_wifi() -> dict:
+    if IS_LINUX:
+        w = _linux_wifi()
+        if w.get("connected"):
+            return w
+    elif IS_WIN:
+        w = _win_wifi()
+        if w.get("connected"):
+            return w
     info = _profiler()
     cur = info.get("spairport_current_network_information", {}) or {}
     ssid = cur.get("_name")
@@ -111,6 +349,14 @@ def get_wifi() -> dict:
 
 
 def get_nearby(current_ssid="") -> list:
+    if IS_LINUX:
+        nets = _linux_nearby(current_ssid)
+        if nets:
+            return nets
+    elif IS_WIN:
+        nets = _win_nearby(current_ssid)
+        if nets:
+            return nets
     info = _profiler()
     out = []
     for n in info.get("spairport_airport_other_local_wireless_networks", []) or []:
@@ -130,38 +376,134 @@ def get_nearby(current_ssid="") -> list:
 
 
 # ---------- IP / gateway / DNS ----------
-def get_ip_info() -> dict:
-    ip = _run(["ipconfig", "getifaddr", "en0"], timeout=5)
-    if not ip or "." not in ip:
-        # fallback: first non-loopback IPv4
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.settimeout(2)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-        except Exception:
-            ip = ""
-    gw = ""
-    route = _run(["route", "-n", "get", "default"], timeout=5)
-    mgw = re.search(r"gateway:\s*(\S+)", route)
-    if mgw:
-        gw = mgw.group(1)
+def _parse_ip_route(text: str) -> str:
+    """Gateway from Linux `ip route show default` (pure function)."""
+    m = re.search(r"^default\s+via\s+(\S+)", text or "", re.M)
+    return m.group(1) if m else ""
+
+
+def _parse_route_n(text: str) -> str:
+    """Gateway from BSD/Linux `route -n` / `netstat -rn` tables (pure function)."""
+    for line in (text or "").splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] in ("0.0.0.0", "default"):
+            if re.match(r"^\d+\.\d+\.\d+\.\d+$", parts[1]):
+                return parts[1]
+    return ""
+
+
+def _parse_route_print(text: str) -> str:
+    """Gateway from Windows `route print -4` (pure function)."""
+    for line in (text or "").splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[0] == "0.0.0.0" and re.match(r"^\d+\.\d+\.\d+\.\d+$", parts[2]):
+            return parts[2]
+    return ""
+
+
+def _parse_resolv_conf(text: str) -> list:
     dns = []
-    sc = _run(["scutil", "--dns"], timeout=5)
-    for m in re.finditer(r"nameserver\[\d+\]\s*:\s*(\S+)", sc):
-        if m.group(1) not in dns:
+    for line in (text or "").splitlines():
+        m = re.match(r"^\s*nameserver\s+(\S+)", line)
+        if m and m.group(1) not in dns and not m.group(1).startswith("127."):
             dns.append(m.group(1))
-    return {"ip": ip, "gateway": gw, "dns": dns[:4],
+    return dns
+
+
+def _parse_ipconfig_dns(text: str) -> list:
+    """DNS servers from Windows `ipconfig /all` (handles continuation lines)."""
+    dns, capture = [], False
+    for line in (text or "").splitlines():
+        m = re.search(r"DNS Servers[^:]*:\s*(\S+)?", line)
+        if m:
+            capture = True
+            if m.group(1) and re.match(r"^[\d.:a-fA-F]+$", m.group(1)):
+                if m.group(1) not in dns:
+                    dns.append(m.group(1))
+            continue
+        if capture:
+            m = re.match(r"^\s+([\d.:a-fA-F]+)\s*$", line)
+            if m:
+                if m.group(1) not in dns:
+                    dns.append(m.group(1))
+            elif line.strip():
+                capture = False
+    return dns
+
+
+def _local_ip() -> str:
+    """First non-loopback IPv4 via a UDP socket trick (works on every OS)."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(2)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return ""
+
+
+def _gateway() -> str:
+    if IS_MAC:
+        route = _run(["route", "-n", "get", "default"], timeout=5)
+        m = re.search(r"gateway:\s*(\S+)", route)
+        if m:
+            return m.group(1)
+    elif IS_LINUX:
+        gw = _parse_ip_route(_run(["ip", "route", "show", "default"], timeout=5))
+        if gw:
+            return gw
+        gw = _parse_route_n(_run(["route", "-n"], timeout=5))
+        if gw:
+            return gw
+    elif IS_WIN:
+        gw = _parse_route_print(_run(["route", "print", "-4"], timeout=8))
+        if gw:
+            return gw
+    return ""
+
+
+def _dns_servers() -> list:
+    dns = []
+    if IS_MAC:
+        sc = _run(["scutil", "--dns"], timeout=5)
+        for m in re.finditer(r"nameserver\[\d+\]\s*:\s*(\S+)", sc):
+            if m.group(1) not in dns:
+                dns.append(m.group(1))
+    elif IS_WIN:
+        dns = _parse_ipconfig_dns(_run(["ipconfig", "/all"], timeout=8))
+    if not dns and not IS_WIN:
+        try:
+            with open("/etc/resolv.conf") as f:
+                dns = _parse_resolv_conf(f.read())
+        except Exception:
+            pass
+    return dns[:4]
+
+
+def get_ip_info() -> dict:
+    ip = ""
+    if IS_MAC:
+        ip = _run(["ipconfig", "getifaddr", "en0"], timeout=5)
+    if not ip or "." not in ip:
+        ip = _local_ip()
+    gw = _gateway()
+    return {"ip": ip, "gateway": gw, "dns": _dns_servers(),
             "valid": bool(ip and not ip.startswith("169.254."))}
 
 
 def ping_avg(host: str, count=2, timeout=3):
-    out = _run(["ping", f"-c{count}", f"-t{timeout}", host], timeout=timeout + 4)
+    out = _run(_ping_cmd(host, count, timeout), timeout=_ping_timeout(count, timeout))
     m = re.search(r"min/avg/max.*=\s*[\d.]+/([\d.]+)/", out)
     if m:
         return float(m.group(1))
+    m = re.search(r"Average\s*=\s*(\d+)\s*ms", out)  # Windows
+    if m:
+        return float(m.group(1))
     if "1 packets received" in out or re.search(r"[1-9]\d* packets received", out):
+        return 1.0
+    if re.search(r"Received\s*=\s*[1-9]", out):  # Windows, sub-ms replies
         return 1.0
     return None
 
@@ -200,10 +542,8 @@ def check_internet(timeout=4) -> dict:
 
 
 # ---------- link vitals: lease (connection time) + speed ----------
-def get_lease_start() -> float | None:
-    """Epoch of DHCP lease start ≈ time this connection came up."""
-    out = _run(["ipconfig", "getsummary", "en0"], timeout=5)
-    m = re.search(r"LeaseStartTime\s*:\s*(\d{1,2})/(\d{1,2})/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})", out)
+def _parse_lease(text: str, pattern: str) -> float | None:
+    m = re.search(pattern, text or "")
     if not m:
         return None
     try:
@@ -214,6 +554,27 @@ def get_lease_start() -> float | None:
         return datetime(y, mon, day, hh, mm, ss).timestamp()
     except Exception:
         return None
+
+
+def get_lease_start() -> float | None:
+    """Epoch of DHCP lease start ≈ time this connection came up."""
+    if IS_MAC:
+        out = _run(["ipconfig", "getsummary", "en0"], timeout=5)
+        return _parse_lease(out, r"LeaseStartTime\s*:\s*(\d{1,2})/(\d{1,2})/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})")
+    if IS_WIN:
+        out = _run(["ipconfig", "/all"], timeout=8)
+        # e.g. "Lease Obtained. . . . : Saturday, October 10, 2026 8:00:00 AM"
+        m = re.search(r"Lease Obtained[^:]*:\s*(.+)", out)
+        if m:
+            from datetime import datetime
+            for fmt in ("%A, %B %d, %Y %I:%M:%S %p", "%d %B %Y %H:%M:%S",
+                        "%m/%d/%Y %I:%M:%S %p"):
+                try:
+                    return datetime.strptime(m.group(1).strip(), fmt).timestamp()
+                except Exception:
+                    continue
+        return None
+    return None
 
 
 _speed_cache = {"ts": 0, "mbps": None}
@@ -261,24 +622,45 @@ def link_stats() -> dict:
 
 
 # ---------- LAN devices ----------
-def _arp_table() -> dict:
-    out = _run(["arp", "-a"], timeout=5)
+def _parse_arp(text: str) -> dict:
+    """Parse BSD/macOS/Linux `arp -a` plus Windows `arp -a` output (pure)."""
     devs = {}
-    for m in re.finditer(r"\(([\d.]+)\)\s+at\s+([0-9a-f:]+)", out, re.I):
+    for m in re.finditer(r"\(([\d.]+)\)\s+at\s+([0-9a-f:-]+)", text or "", re.I):
         if m.group(2).lower() != "incomplete":
-            devs[m.group(1)] = m.group(2).lower()
+            devs[m.group(1)] = m.group(2).lower().replace("-", ":")
+    for line in (text or "").splitlines():
+        m = re.match(r"^\s*([\d.]+)\s+([0-9a-fA-F-]{17})\s+\w+", line)
+        if m:
+            devs[m.group(1)] = m.group(2).lower().replace("-", ":")
     return devs
+
+
+def _arp_table() -> dict:
+    return _parse_arp(_run(["arp", "-a"], timeout=5))
+
+
+def _ping_alive(out: str) -> tuple:
+    """(alive, latency_ms|None) from BSD/Linux/Windows ping output."""
+    m = re.search(r"time[=<]([\d.]+)\s*ms", out)
+    ms = float(m.group(1)) if m else None
+    if re.search(r"[1-9]\d* packets received", out):
+        return True, ms if ms is not None else 1.0
+    if "1 packets received" in out:
+        return True, ms if ms is not None else 1.0
+    m = re.search(r"Received\s*=\s*(\d+)", out)  # Windows
+    if m and int(m.group(1)) > 0:
+        m2 = re.search(r"Average\s*=\s*(\d+)\s*ms", out)
+        return True, float(m2.group(1)) if m2 else (ms if ms is not None else 1.0)
+    return False, None
 
 
 def _sweep(prefix: str, self_ip: str, timeout=1) -> list:
     targets = [f"{prefix}.{i}" for i in range(1, 255) if f"{prefix}.{i}" != self_ip]
 
     def _one(ip):
-        out = _run(["ping", "-c1", "-t1", ip], timeout=timeout + 1)
-        if "1 packets received" in out:
-            m = re.search(r"time=([\d.]+)\s*ms", out)
-            return ip, float(m.group(1)) if m else 1.0
-        return None
+        out = _run(_ping_cmd(ip, 1, timeout), timeout=timeout + 3)
+        alive, ms = _ping_alive(out)
+        return (ip, ms) if alive else None
 
     alive = []
     with ThreadPoolExecutor(max_workers=64) as ex:
