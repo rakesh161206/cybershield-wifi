@@ -510,15 +510,24 @@ def ip_watchlist():
 
 @app.get("/api/ip/report")
 def ip_report_endpoint(ip: str = Query(""), format: str = Query("md")):
+    """Investigation report as Markdown, JSON or CSV."""
     ip = (ip or "").strip()
     if not ip:
         return {"error": "ip required"}
+    fmt = (format or "md").lower()
+    if fmt not in ("md", "json", "csv"):
+        return {"error": "format must be md, json or csv"}
     res = _observe_peers(force=False)
     intel = res["intel"].get(ip) or ip_intel.lookup(ip)
     assessed = next((a for a in res["assessed"] if a.get("ip") == ip), None)
     report = ip_report.build(ip, intel=intel, assessed=assessed)
-    if format == "json":
+    if fmt == "json":
         return report
+    if fmt == "csv":
+        rows = ip_report.render_csv(report)
+        return Response(content=rows, media_type="text/csv",
+                        headers={"Content-Disposition":
+                                 f'attachment; filename="cybershield-{ip.replace(":", "_")}.csv"'})
     return {"ip": ip, "format": "markdown", "report": ip_report.render_markdown(report),
             "verdict": report["verdict"], "score": report["score"]}
 

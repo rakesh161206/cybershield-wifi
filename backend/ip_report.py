@@ -224,3 +224,47 @@ def render_markdown(r):
     lines.append(f"- {r.get('note')}")
     lines.append("")
     return "\n".join(lines)
+
+
+def render_csv(r):
+    """Flat CSV export of the same facts the Markdown report contains."""
+    import csv
+    import io
+    f = r.get("facts", {})
+    o = r.get("observed", {})
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["section", "field", "value"])
+    w.writerow(["summary", "ip", r.get("ip", "")])
+    w.writerow(["summary", "verdict", r.get("verdict", "")])
+    w.writerow(["summary", "score", r.get("score", 0)])
+    w.writerow(["summary", "purpose", r.get("purpose", {}).get("label", "")])
+    w.writerow(["summary", "purpose_confidence", r.get("purpose_confidence", "")])
+    for k, label in (("scope", "scope"), ("reverse_dns", "reverse_dns"),
+                     ("asn", "asn"), ("as_name", "as_name"), ("prefix", "prefix"),
+                     ("rir", "rir"), ("country", "country"), ("city", "city"),
+                     ("org", "org"), ("isp", "isp")):
+        w.writerow(["facts", label, f.get(k, "")])
+    w.writerow(["observed", "first_seen", o.get("first_seen", "")])
+    w.writerow(["observed", "last_seen", o.get("last_seen", "")])
+    w.writerow(["observed", "hits", o.get("hits", 0)])
+    w.writerow(["observed", "ports", " ".join(str(p) for p in o.get("ports") or [])])
+    w.writerow(["observed", "protocols", " ".join(o.get("protocols") or [])])
+    w.writerow(["observed", "programs", " ".join(o.get("actors") or [])])
+    for s in o.get("services") or []:
+        w.writerow(["service", f"{s.get('proto')}/{s.get('port')}",
+                    f"first={s.get('first_seen', '')} last={s.get('last_seen', '')} "
+                    f"hits={s.get('hits', 0)}"])
+    for lst in (r.get("reputation") or {}).get("lists") or []:
+        w.writerow(["reputation", lst.get("name", ""), lst.get("type", "")])
+    for x in r.get("reasons") or []:
+        w.writerow(["reason", "", x])
+    for a in r.get("alerts") or []:
+        w.writerow(["alert", f"{a.get('severity', '')} {a.get('type', '')}",
+                    f"{a.get('title', '')} | {a.get('evidence', '')}"])
+    for x in r.get("recommendations") or []:
+        w.writerow(["recommendation", "", x])
+    w.writerow(["method", "sources_used", ", ".join(r.get("sources_used") or [])])
+    w.writerow(["method", "sources_missing", ", ".join(r.get("sources_missing") or [])])
+    w.writerow(["method", "note", r.get("note", "")])
+    return buf.getvalue()
