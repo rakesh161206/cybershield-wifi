@@ -1,0 +1,26 @@
+# CyberShield Wi-Fi — simulated demo mode.
+#
+#   docker compose up --build
+#   open http://127.0.0.1:8000
+#
+# The container has no access to your real Wi-Fi, ARP table or packets, so
+# it runs the SIMULATED demo. Live mode is not available here — use
+# ./run.sh on the host for that.
+services:
+  cybershield:
+    build: .
+    image: cybershield-wifi:demo
+    container_name: cybershield-demo
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      CYBERSHIELD_HOST: "0.0.0.0"
+      PORT: "8000"
+      CYBERSHIELD_ALLOWED_HOSTS: "localhost,127.0.0.1"
+      CYBERSHIELD_ALLOWED_ORIGINS: "http://localhost:8000,http://127.0.0.1:8000"
+    volumes:
+      - demo-data:/app/backend
+    restart: unless-stopped
+
+volumes:
+  demo-data:

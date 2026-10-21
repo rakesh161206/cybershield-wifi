@@ -90,6 +90,7 @@ button{min-height:40px}
     <button data-tab="overview" class="tabbtn active whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">Overview</button>
     <button data-tab="networks" class="tabbtn whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">Networks <span id="netTabBadge" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-slate-800 text-slate-300"></span></button>
     <button data-tab="devices" class="tabbtn whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">Devices <span id="devTabBadge" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-slate-800 text-slate-300"></span></button>
+    <button data-tab="demo" class="tabbtn whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">Demo mode</button>
     <button data-tab="ipintel" class="tabbtn whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">IP Intel <span id="ipTabBadge" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-slate-800 text-slate-300"></span></button>
     <button data-tab="intel" class="tabbtn whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">AI &amp; Telemetry</button>
     <button data-tab="timeline" class="tabbtn whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">Timeline</button>
@@ -97,6 +98,22 @@ button{min-height:40px}
 
   <!-- ===== Overview ===== -->
   <div id="tab-overview">
+    <!-- Big plain-language verdict -->
+    <section id="verdictHero" class="rounded-lg p-4 mb-4 border bg-slate-900/70">
+      <div class="flex flex-wrap items-center gap-4">
+        <div id="heroIcon" class="text-5xl leading-none">–</div>
+        <div class="min-w-0">
+          <div id="heroTitle" class="text-2xl md:text-3xl font-extrabold text-white">Checking…</div>
+          <div id="heroSub" class="text-sm text-slate-300 mt-0.5">Reading the live connection</div>
+        </div>
+        <div class="md:ml-auto text-right">
+          <div class="text-[11px] uppercase tracking-wider text-slate-400">Risk score</div>
+          <div id="heroScore" class="text-3xl font-extrabold text-white">–</div>
+        </div>
+      </div>
+      <div class="mt-3 w-full bg-slate-800 rounded h-2"><div id="heroBar" class="h-2 rounded bg-slate-600" style="width:0%"></div></div>
+      <div id="heroWhy" class="text-xs text-slate-400 mt-2"></div>
+    </section>
     <div id="ipAlertBanner" class="hidden"></div>
     <div id="policyBanner" class="hidden"></div>
     <div id="rogueBanner" class="hidden"></div>
@@ -177,6 +194,42 @@ button{min-height:40px}
       </table></div>
       <p id="lanMeta" class="text-xs text-slate-500 mt-2"></p>
     </section>
+  </div>
+
+  <!-- ===== Demo mode (simulated) ===== -->
+  <div id="tab-demo" class="hidden">
+    <section class="card rounded-lg p-4 mb-4 border-amber-500/20">
+      <h2 class="font-bold text-white">Simulated demo mode</h2>
+      <p class="text-xs text-slate-400 mb-3">This tab is <b class="text-amber-300">synthetic data</b>. Nothing here touches your real network — the devices, the traffic and the decoys are fixtures. It exists so the risk engine, the incident log and the timeline can be demonstrated without an attacker on your LAN. Live checks of your actual Wi-Fi are on the Overview, Networks, Devices and IP Intel tabs.</p>
+      <div class="flex flex-wrap items-center gap-2">
+        <button id="btnAttack" class="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded text-sm font-bold">⚡ Simulate Wi-Fi attack</button>
+        <button id="btnRestore" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-4 py-2 rounded text-sm font-bold">Restore normal baseline</button>
+        <span id="demoTarget" class="text-xs text-slate-400"></span>
+      </div>
+      <div id="demoStats" class="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm mt-4"></div>
+    </section>
+
+    <section class="card rounded-lg p-4 mb-4">
+      <h2 class="font-bold text-white mb-2">Simulated device fleet</h2>
+      <p class="text-xs text-slate-400 mb-2">Trust starts near 92–95. <b>Mark safe</b> records a device's current behaviour as its own baseline; from then on it is judged against its own history, not only against global thresholds.</p>
+      <div class="overflow-x-auto"><table class="w-full text-sm rtable">
+        <thead class="text-slate-400 text-xs uppercase"><tr><th class="text-left p-2">Device</th><th class="text-left p-2">IP</th><th class="text-left p-2">Trust</th><th class="text-left p-2">Risk</th><th class="text-left p-2">Status</th><th class="text-left p-2">Baseline</th><th class="text-left p-2">Actions</th></tr></thead>
+        <tbody id="demoRows"></tbody>
+      </table></div>
+    </section>
+
+    <div class="grid lg:grid-cols-2 gap-4 mb-4">
+      <section class="card rounded-lg p-4">
+        <h2 class="font-bold text-white mb-1">Decoy assets</h2>
+        <p class="text-xs text-slate-400 mb-2">Decoys are fake services nobody was told about. A device that touches one is telling you something real — touching a decoy always counts, even if the model misses it.</p>
+        <div id="decoyRows" class="text-sm space-y-1"></div>
+      </section>
+      <section class="card rounded-lg p-4">
+        <h2 class="font-bold text-white mb-1">Device timeline</h2>
+        <p class="text-xs text-slate-400 mb-2">Every scored signal, in the order it arrived.</p>
+        <div id="demoTimeline" class="text-sm space-y-1 max-h-[50vh] overflow-y-auto"></div>
+      </section>
+    </div>
   </div>
 
   <!-- ===== IP Intelligence ===== -->
@@ -315,18 +368,54 @@ const obj = v => (v && typeof v==='object')?v:{};
 const num = v => (typeof v==='number' && isFinite(v))?v:null;
 
 let apiFail = 0;
+let sessionToken = '';
+const TOKEN_HEADER = 'X-CyberShield-Token';
+
+async function fetchToken(){
+  try{
+    const r = await fetch('/api/session', {headers:{'Accept':'application/json'}});
+    if(!r.ok) return '';
+    const j = await r.json();
+    sessionToken = j && j.token ? j.token : '';
+    return sessionToken;
+  }catch(e){ return ''; }
+}
 const api = async (p, o={}) => {
+  const {timeout=20000, ...rest} = o;
+  const method = (rest.method || 'GET').toUpperCase();
+  const doFetch = async (retry) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(()=>ctrl.abort(), timeout);
+    try{
+      const headers = Object.assign({'Content-Type':'application/json'}, rest.headers || {});
+      if(sessionToken) headers[TOKEN_HEADER] = sessionToken;
+      const r = await fetch(p, {...rest, headers, signal:ctrl.signal});
+      if(r.status === 401 && !retry){
+        await fetchToken();
+        return await doFetch(true);
+      }
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const j = await r.json();
+      apiFail = 0; setApiDot();
+      return j;
+    } finally { clearTimeout(t); }
+  };
+  return await doFetch(false);
+};
+const apiText = async (p, o={}) => {
   const {timeout=20000, ...rest} = o;
   const ctrl = new AbortController();
   const t = setTimeout(()=>ctrl.abort(), timeout);
   try{
-    const r = await fetch(p, {headers:{'Content-Type':'application/json'}, ...rest, signal:ctrl.signal});
+    const headers = Object.assign({'Content-Type':'application/json'}, rest.headers || {});
+    if(sessionToken) headers[TOKEN_HEADER] = sessionToken;
+    const r = await fetch(p, {...rest, headers, signal:ctrl.signal});
     if(!r.ok) throw new Error('HTTP '+r.status);
-    const j = await r.json();
     apiFail = 0; setApiDot();
-    return j;
+    return await r.text();
   } finally { clearTimeout(t); }
 };
+
 function setApiDot(){
   const d = document.getElementById('apiDot');
   if(!d) return;
@@ -335,18 +424,42 @@ function setApiDot(){
 }
 const on = (id, ev, fn) => { const e=document.getElementById(id); if(e) e.addEventListener(ev, fn); };
 
+/* ================= toast ================= */
+function notify(msg, kind){
+  let box = document.getElementById('toastBox');
+  if(!box){
+    box = document.createElement('div');
+    box.id = 'toastBox';
+    box.className = 'fixed bottom-4 right-4 z-50 flex flex-col gap-2 items-end';
+    document.body.appendChild(box);
+  }
+  const bg = kind==='error' ? 'border-red-500/50 bg-red-950/90 text-red-100'
+            : kind==='ok'    ? 'border-emerald-500/50 bg-emerald-950/90 text-emerald-100'
+                             : 'border-slate-600 bg-slate-800/95 text-slate-100';
+  const el = document.createElement('div');
+  el.className = `text-xs px-3 py-2 rounded border shadow-lg max-w-xs ${bg}`;
+  el.textContent = msg;
+  box.appendChild(el);
+  setTimeout(()=>{ el.remove(); }, 5200);
+}
+
 /* ================= tabs + polling ================= */
-const TABS = ['overview','networks','devices','ipintel','intel','timeline'];
+const TABS = ['overview','networks','devices','demo','ipintel','intel','timeline'];
 let activeTab = 'overview';
 const SCHEDULE = {
   overview: [['refreshLive',8000],['refreshHealth',20000]],
   networks: [['loadRadar',12000]],
   devices:  [],
+  demo:     [['refreshDemo',4000]],
   ipintel:  [['refreshIPIntel',10000],['refreshIPAlerts',15000]],
   intel:    [['refreshAI',10000],['refreshPacket',30000],['refreshCapture',15000]],
   timeline: [['refreshTimeline',15000]],
 };
 const lastRun = {};
+// The KPI strip is global, so these refresh on every tab at a slower
+// cadence than the tab itself uses. Without this the header would show
+// empty numbers while you are looking at a different tab.
+const GLOBAL_POLL = [['loadRadar',30000], ['refreshIPIntel',30000]];
 function switchTab(name){
   activeTab = name;
   document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('active', x.dataset.tab===name));
@@ -360,7 +473,10 @@ function runNow(){
 }
 function tick(){
   const now = Date.now();
-  (SCHEDULE[activeTab]||[]).forEach(([fn,ms])=>{
+  const jobs = new Map();
+  (SCHEDULE[activeTab]||[]).forEach(([fn,ms])=> jobs.set(fn, Math.min(jobs.get(fn) ?? Infinity, ms)));
+  GLOBAL_POLL.forEach(([fn,ms])=>{ if(!jobs.has(fn)) jobs.set(fn, ms); });
+  jobs.forEach((ms,fn)=>{
     if(!lastRun[fn] || now-lastRun[fn] >= ms){
       lastRun[fn]=now;
       const f = window[fn];
@@ -370,6 +486,34 @@ function tick(){
 }
 setInterval(tick, 1000);
 setInterval(()=>{ const c=document.getElementById('clock'); if(c) c.textContent = new Date().toLocaleTimeString(); },1000);
+
+/* ================= plain-language verdict ================= */
+const VERDICT_STATES = {
+  safe:    {icon:'🟢', label:'SAFE',     cls:'text-green-400', border:'border-green-500/40', bg:'bg-green-500/10', bar:'bg-green-500'},
+  careful: {icon:'🟡', label:'CAREFUL',  cls:'text-yellow-400', border:'border-yellow-500/40', bg:'bg-yellow-500/10', bar:'bg-yellow-500'},
+  danger:  {icon:'🔴', label:'DANGER',   cls:'text-red-400',   border:'border-red-500/40',   bg:'bg-red-500/10',   bar:'bg-red-500'},
+};
+function verdictState(score){
+  const n = num(score);
+  if(n === null) return {key:'unknown', icon:'–', label:'UNKNOWN', cls:'text-slate-400', border:'border-slate-700', bg:'bg-slate-800/60', bar:'bg-slate-600'};
+  if(n <= 30) return {...VERDICT_STATES.safe, key:'safe'};
+  if(n <= 60) return {...VERDICT_STATES.careful, key:'careful'};
+  return {...VERDICT_STATES.danger, key:'danger'};
+}
+function renderHero(score, label, why){
+  const st = verdictState(score);
+  const hero = document.getElementById('verdictHero'); if(!hero) return;
+  hero.className = `rounded-lg p-4 mb-4 border ${st.border} ${st.bg}`;
+  const ic = document.getElementById('heroIcon'); if(ic) ic.textContent = st.icon;
+  const ti = document.getElementById('heroTitle');
+  if(ti){ ti.textContent = st.label; ti.className = `text-2xl md:text-3xl font-extrabold ${st.cls}`; }
+  const sub = document.getElementById('heroSub'); if(sub) sub.textContent = label || '';
+  const sc = document.getElementById('heroScore');
+  if(sc){ sc.textContent = num(score)===null ? '–' : `${num(score)}/100`; sc.className = `text-3xl font-extrabold ${st.cls}`; }
+  const bar = document.getElementById('heroBar');
+  if(bar){ bar.style.width = `${num(score)===null?0:Math.min(100,num(score))}%`; bar.className = `h-2 rounded ${st.bar}`; }
+  const wy = document.getElementById('heroWhy'); if(wy) wy.textContent = why || '';
+}
 
 /* ================= live / overview ================= */
 async function refreshLive(){
@@ -382,7 +526,18 @@ async function refreshLive(){
   if(dot){ dot.textContent='● live'; dot.className='text-xs text-green-400'; }
   const lvl = r.level;
   const v = document.getElementById('liveVerdict');
-  if(v){ v.textContent = (lvl==='low'?'🟢 ':lvl==='caution'?'🟡 ':lvl==='high'?'🟠 ':'🔴 ') + (r.verdict||'–'); }
+  const plainState = (lvl==='low')?'SAFE':(lvl==='caution')?'CAREFUL':'DANGER';
+  if(v){
+    const st = verdictState(r.score);
+    v.textContent = `${st.icon} ${plainState}`;
+    v.className = `text-lg font-bold ${st.cls}`;
+  }
+  const plain = (lvl==='low') ? 'Your connection looks fine.' :
+                (lvl==='caution') ? 'Your connection has issues worth reading.' :
+                (lvl==='high') ? 'Your connection has serious problems.' :
+                'Your connection is not safe to use as-is.';
+  const why = arr(r.reasons).length ? arr(r.reasons).join(' · ') : 'No risk signals detected.';
+  renderHero(r.score, plain + (w.connected ? ` Connected to “${w.ssid||'unknown'}”.` : ' Not connected to Wi-Fi.'), why);
   const sig = w.signal_dbm!=null ? `${w.signal_dbm} dBm` : 'n/a';
   const cards = [
     ['Network', w.connected?`📶 <b class="text-white">${esc(w.ssid||'—')}</b>`:'Not connected'],
@@ -694,6 +849,84 @@ function renderLanRows(){
 on('btnScan','click', () => refreshLan('full', 1));
 on('devSearch','input', e=>{ devQuery = e.target.value; renderLanRows(); });
 
+/* ================= demo mode (simulated) ================= */
+let demoDevices = [];
+const STATUS_STYLE = s => s==='trusted' ? 'background:#14532d;color:#bbf7d0'
+  : s==='suspicious' ? 'background:#713f12;color:#fde68a'
+  : s==='high' ? 'background:#7c2d12;color:#fed7aa'
+  : 'background:#7f1d1d;color:#fecaca';
+async function refreshDemo(){
+  let devs, stats, decoys, events;
+  try{
+    [devs, stats, decoys, events] = await Promise.all([
+      api('/api/devices'), api('/api/stats'), api('/api/decoys'), api('/api/events?limit=40')]);
+  }catch(e){ return; }
+  demoDevices = arr(devs);
+  const st = document.getElementById('demoStats');
+  if(st) st.innerHTML = [
+    ['Devices', stats.total],['Trusted', stats.trusted],['Suspicious', stats.suspicious],
+    ['Critical', stats.critical],['Isolated', stats.isolated],
+  ].map(([k,v])=>`<div class="panel rounded p-2"><div class="text-xs text-slate-400">${k}</div><div class="text-lg font-bold text-white">${v}</div></div>`).join('');
+  const target = demoDevices.find(d=>d.id==='DEVICE-007') || demoDevices[0];
+  const tg = document.getElementById('demoTarget');
+  if(tg) tg.textContent = target ? `Target: ${target.id} (${target.name})` : '';
+  const rows = document.getElementById('demoRows');
+  if(rows) rows.innerHTML = demoDevices.map(d=>{
+    const trust = num(d.trust) ?? 0, risk = num(d.risk) ?? 0;
+    const base = d.marked_safe
+      ? `<span class="chip" style="background:#14532d;color:#bbf7d0">recorded ${esc((d.baseline_established||'').slice(0,10))}</span>${d.baseline_deviated?' <span class="chip" style="background:#7f1d1d;color:#fecaca">deviated</span>':''}`
+      : `<span class="text-slate-500 text-xs">not recorded</span>`;
+    return `<tr class="border-t border-slate-800">
+      <td class="p-2" data-l="Device"><b class="text-slate-200">${esc(d.name)}</b><div class="text-xs text-slate-500 mono">${esc(d.id)}</div></td>
+      <td class="p-2 mono text-xs" data-l="IP">${esc(d.ip)}</td>
+      <td class="p-2" data-l="Trust"><span class="mono font-bold text-slate-200">${trust}</span><div class="w-14 bg-slate-700 rounded h-1 mt-1"><div class="h-1 rounded bg-sky-500" style="width:${trust}%"></div></div></td>
+      <td class="p-2" data-l="Risk"><span class="mono font-bold" style="color:${risk>=80?'#ef4444':risk>=61?'#f97316':risk>=31?'#eab308':'#22c55e'}">${risk}</span></td>
+      <td class="p-2" data-l="Status"><span class="px-1.5 py-0.5 rounded text-xs font-bold" style="${STATUS_STYLE(d.status)}">${esc(String(d.status||'').toUpperCase())}</span>${d.isolated?' <span class="text-xs text-red-400">isolated</span>':''}</td>
+      <td class="p-2 text-xs" data-l="Baseline">${base}</td>
+      <td class="p-2 text-xs" data-l="Actions">
+        <button data-marksafe="${esc(d.id)}" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded font-bold mr-1">${d.marked_safe?'Reset baseline':'Mark safe'}</button>
+        <button data-isolate="${esc(d.id)}" class="bg-red-700 hover:bg-red-600 px-2 py-1 rounded font-bold mr-1">Isolate</button>
+        <button data-allow="${esc(d.id)}" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded font-bold">Restore</button>
+      </td></tr>`;
+  }).join('') || '<tr><td class="p-2 text-slate-500">No devices.</td></tr>';
+
+  const dr = document.getElementById('decoyRows');
+  if(dr) dr.innerHTML = arr(decoys).map(d=>
+    `<div class="flex flex-wrap items-center gap-2 bg-slate-800 border border-slate-700 rounded px-2 py-1">
+      <span class="chip" style="background:#713f12;color:#fde68a">🍯</span>
+      <b class="text-slate-200 text-xs">${esc(d.name)}</b>
+      <span class="text-xs text-slate-400 flex-1">${esc(d.desc)}</span>
+      <button data-decoy="${esc(d.id)}" class="bg-amber-700 hover:bg-amber-600 px-2 py-1 rounded text-xs font-bold">Touch as DEVICE-007</button>
+    </div>`).join('');
+
+  const dt = document.getElementById('demoTimeline');
+  if(dt) dt.innerHTML = arr(events).slice().reverse().map(e=>
+    `<div class="bg-slate-800 border border-slate-700 rounded px-2 py-1">
+      <span class="text-xs text-slate-500">${esc((e.ts||'').slice(11,19))}</span>
+      <span class="font-bold text-xs text-sky-400">${esc(e.type)}</span>
+      <span class="text-xs text-slate-300">${esc(e.detail)}</span></div>`).join('')
+    || '<div class="text-xs text-slate-500">No events yet.</div>';
+}
+on('btnAttack','click', async ()=>{
+  const b = document.getElementById('btnAttack'); const label = b.textContent;
+  b.textContent = 'Attack running…';
+  b.disabled = true;
+  try{
+    // One signal at a time, so the risk score is visibly climbing.
+    for(let step=0; step<=6; step++){
+      await api('/api/simulate/attack',{method:'POST',body:JSON.stringify({device_id:'DEVICE-007',step})});
+      refreshDemo();
+      await new Promise(r=>setTimeout(r, 620));
+    }
+    notify('Attack complete: DEVICE-007 reached risk 100 and was quarantined.', 'ok');
+  }catch(e){ notify('Attack simulation failed: '+(e.message||'unknown error'), 'error'); }
+  b.textContent = label; b.disabled = false;
+});
+on('btnRestore','click', async ()=>{
+  try{ await api('/api/simulate/normal',{method:'POST'}); }catch(e){}
+  refreshDemo(); refreshTimeline();
+});
+
 /* ================= IP intelligence ================= */
 const SEV_COLOR = {critical:'#ef4444', high:'#f97316', medium:'#eab308', low:'#38bdf8', info:'#64748b'};
 const SEV_BG = {critical:'#7f1d1d', high:'#7c2d12', medium:'#713f12', low:'#0c4a6e', info:'#334155'};
@@ -847,7 +1080,7 @@ function renderIPDetail(){
       Program: ${esc(arr(r.actor_names).join(', ')||r.actor_class||'not attributed')}<br>
       First seen: ${esc(r.first_seen||'–')} · Hits: ${esc(r.hits||0)}
     </div>
-    <div id="ipReportOut"></div>`;
+    <div id="ipReportOutDetail"></div>`;
 }
 async function loadIPDetail(ip){
   ipSelected = ip;
@@ -873,7 +1106,7 @@ async function loadIPDetail(ip){
       <div class="text-xs mb-2">${rep.matched ? arr(rep.lists).map(l=>`<span class="chip mr-1" style="background:#7f1d1d;color:#fecaca">${esc(l.name)} (${esc(l.type)})</span>`).join('') : '<span class="text-slate-500">No match in the local reputation feeds.</span>'}</div>
       <div class="text-xs text-slate-400 mb-1">Enrichment sources</div>
       <div class="text-xs text-slate-300 mb-2">Used: ${esc(arr(i.sources).join(', ')||'none')} · Unavailable: ${esc(arr(i.missing).join(', ')||'none')}</div>
-      <div id="ipReportOut"></div>`;
+      <div id="ipReportOutLookup"></div>`;
   }catch(e){
     el.innerHTML = `<div class="text-xs text-red-400">Lookup failed: ${esc(e.message||'error')}</div>`;
   }
@@ -1003,8 +1236,8 @@ on('btnCapStart','click', async ()=>{
     filter: document.getElementById('capFilter').value || ''};
   try{
     const r = await api('/api/real/capture/start',{method:'POST',body:JSON.stringify(body),timeout:30000});
-    if(r.detail && !r.ok) alert(r.detail);
-  }catch(e){ alert('Capture request failed: '+(e.message||'')); }
+    if(r.detail && !r.ok) notify(r.detail, 'error');
+  }catch(e){ notify('Capture request failed: '+(e.message||'unknown error'), 'error'); }
   refreshCapture();
 });
 on('btnCapStop','click', async ()=>{ try{ await api('/api/real/capture/stop',{method:'POST'}); }catch(e){} refreshCapture(); });
@@ -1044,9 +1277,27 @@ on('btnVerify','click', async ()=>{
 
 /* ================= global action delegation ================= */
 document.addEventListener('click', async ev=>{
-  const b = ev.target.closest('[data-block],[data-unblock],[data-flag],[data-ipack],[data-ipwatch],[data-ipreport],[data-gotoip]');
+  const b = ev.target.closest('[data-block],[data-unblock],[data-flag],[data-ipack],[data-ipwatch],[data-ipreport],[data-gotoip],[data-marksafe],[data-isolate],[data-allow],[data-decoy]');
   if(!b) return;
   if(b.dataset.gotoip){ switchTab('ipintel'); return; }
+  if(b.dataset.marksafe){
+    const id = b.dataset.marksafe;
+    b.textContent = 'Saving…';
+    try{ await api(`/api/device/${id}/${id && demoDevices.find(d=>d.id===id)?.marked_safe ? 'unmark-safe' : 'mark-safe'}`,{method:'POST'}); }catch(e){}
+    refreshDemo();
+  }
+  if(b.dataset.isolate){
+    try{ await api(`/api/device/${b.dataset.isolate}/isolate`,{method:'POST'}); }catch(e){}
+    refreshDemo();
+  }
+  if(b.dataset.allow){
+    try{ await api(`/api/device/${b.dataset.allow}/allow`,{method:'POST'}); }catch(e){}
+    refreshDemo();
+  }
+  if(b.dataset.decoy){
+    try{ await api(`/api/decoy/${b.dataset.decoy}?device_id=DEVICE-007`); }catch(e){}
+    refreshDemo();
+  }
   if(b.dataset.block){
     if(!confirm(`Block "${b.dataset.block}"? This computer will forget it and won't auto-join it again.`)) return;
     b.textContent = 'Blocking…';
@@ -1075,22 +1326,40 @@ document.addEventListener('click', async ev=>{
   }
   if(b.dataset.ipreport){
     const ip = b.dataset.ipreport;
-    const out = document.getElementById('ipReportOut');
+    const out = document.getElementById('ipReportOutDetail') || document.getElementById('ipReportOutLookup');
     if(out) out.innerHTML = '<div class="text-xs text-slate-500">Building report…</div>';
     try{
       const r = await api(`/api/ip/report?ip=${encodeURIComponent(ip)}`,{timeout:40000});
       const txt = r.report || '';
-      if(out) out.innerHTML = `<div class="text-xs text-slate-400 mb-1">Investigation report — <a href="#" id="dlReport" class="text-sky-400 font-bold">download .md</a></div>
+      if(out) out.innerHTML = `<div class="text-xs text-slate-400 mb-1">Investigation report</div>
+        <div class="flex flex-wrap gap-2 mb-2">
+          <button data-repx="md" data-ip="${esc(ip)}" class="bg-sky-700 hover:bg-sky-600 px-2 py-1 rounded text-xs font-bold">Download .md</button>
+          <button data-repx="json" data-ip="${esc(ip)}" class="bg-sky-700 hover:bg-sky-600 px-2 py-1 rounded text-xs font-bold">Download .json</button>
+          <button data-repx="csv" data-ip="${esc(ip)}" class="bg-sky-700 hover:bg-sky-600 px-2 py-1 rounded text-xs font-bold">Download .csv</button>
+        </div>
         <pre class="bg-slate-900 border border-slate-700 rounded p-2 text-[11px] text-slate-300 whitespace-pre-wrap max-h-80 overflow-y-auto">${esc(txt)}</pre>`;
-      const dl = document.getElementById('dlReport');
-      if(dl) dl.onclick = ev2=>{
-        ev2.preventDefault();
-        const blob = new Blob([txt],{type:'text/markdown'});
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob); a.download = `cybershield-report-${ip.replace(/[^a-zA-Z0-9._-]/g,'_')}.md`;
-        document.body.appendChild(a); a.click(); a.remove();
-      };
     }catch(e){ if(out) out.innerHTML = `<div class="text-xs text-red-400">Report failed: ${esc(e.message||'')}</div>`; }
+  }
+  if(b.dataset.repx){
+    const ip = b.dataset.ip, fmt = b.dataset.repx;
+    try{
+      let body, name, mime;
+      if(fmt==='json'){
+        const r = await api(`/api/ip/report?ip=${encodeURIComponent(ip)}&format=json`,{timeout:40000});
+        body = JSON.stringify(r,null,2); name = '.json'; mime='application/json';
+      } else if(fmt==='csv'){
+        body = await apiText(`/api/ip/report?ip=${encodeURIComponent(ip)}&format=csv`,{timeout:40000});
+        name = '.csv'; mime='text/csv';
+      } else {
+        const r = await api(`/api/ip/report?ip=${encodeURIComponent(ip)}&format=md`,{timeout:40000});
+        body = r.report || ''; name = '.md'; mime='text/markdown';
+      }
+      const blob = new Blob([body],{type:mime});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `cybershield-report-${ip.replace(/[^a-zA-Z0-9._-]/g,'_')}${name}`;
+      document.body.appendChild(a); a.click(); a.remove();
+    }catch(e){ notify('Export failed: '+(e.message||'unknown error'), 'error'); }
   }
 });
 on('radar','click', ev=>{  const cv = ev.currentTarget, rect = cv.getBoundingClientRect();
@@ -1105,6 +1374,7 @@ on('radar','click', ev=>{  const cv = ev.currentTarget, rect = cv.getBoundingCli
 drawRadar();
 switchTab('overview');
 refreshHealth();
+fetchToken().then(()=>{ apiFail = 0; setApiDot(); });
 </script>
 </body>
 </html>
