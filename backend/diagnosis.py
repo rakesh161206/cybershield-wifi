@@ -83,8 +83,11 @@ def classify(status=None, ai=None, rogue_warnings=None, loss=None, radar=None):
             attack_score += 3 if w.get("severity") == "high" else 2
             attack_evidence.append(f"Security change on '{w.get('ssid')}': {w.get('detail')}")
         elif t == "possible_twin":
-            attack_score += 2
-            attack_evidence.append(f"Duplicate AP settings for '{w.get('ssid')}'.")
+            if w.get("security_changed"):
+                attack_score += 2
+                attack_evidence.append(f"Duplicate AP settings for '{w.get('ssid')}'.")
+            # Multichannel sightings with identical security (dual-band/mesh)
+            # are normal and contribute nothing.
         elif t == "current_on_weak":
             attack_score += 2
             attack_evidence.append(w.get("detail", ""))

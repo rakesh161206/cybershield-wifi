@@ -6,6 +6,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="description" content="CyberShield Wi-Fi — Zero-Trust wireless security, network risk scoring and IP purpose intelligence.">
 <title>CyberShield — Zero-Trust Wi-Fi Security</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
@@ -29,6 +30,12 @@ button{min-height:40px}
   table.rtable td::before{content:attr(data-l);display:block;font-size:10px;letter-spacing:.05em;color:#64748b;text-transform:uppercase}
   table.rtable td:empty{display:none}
 }
+.kpi-verdict{border-color:#334155;box-shadow:0 0 0 1px rgba(56,189,248,.08)}
+.spark{width:100%;height:44px;display:block}
+.chip{display:inline-block;padding:.1rem .45rem;border-radius:.25rem;font-size:11px;font-weight:700;letter-spacing:.02em}
+.srow{cursor:pointer}
+.srow:hover{background:rgba(30,41,59,.8)}
+.stale{opacity:.45;filter:saturate(.4)}
 </style>
 </head>
 <body class="text-slate-200 min-h-screen">
@@ -38,17 +45,17 @@ button{min-height:40px}
   <header class="flex flex-wrap items-center justify-between gap-3 mb-4">
     <div>
       <h1 class="text-2xl md:text-3xl font-extrabold tracking-tight text-white">🛡️ CYBERSHIELD <span class="text-sky-400">Wi-Fi</span></h1>
-      <p class="text-slate-400 text-sm">Zero-Trust wireless security operations · <span id="liveDot" class="text-slate-500">checking…</span></p>
+      <p class="text-slate-400 text-sm">Zero-Trust wireless security operations · <span id="liveDot" class="text-slate-500">checking…</span> <span id="apiDot" class="text-slate-600 text-xs"></span></p>
     </div>
     <div class="flex items-center gap-2">
       <span id="clock" class="mono text-xs text-slate-400 hidden sm:inline"></span>
-      <button id="btnDisconnect" title="Emergency: turn Wi-Fi off" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs font-bold text-slate-200">Disconnect Wi-Fi</button>
+      <button id="btnDisconnect" title="Emergency: turn Wi-Fi off" class="bg-transparent hover:bg-red-950 border border-red-800 text-red-300 px-3 py-1 rounded text-xs font-bold">⏻ Disconnect Wi-Fi</button>
     </div>
   </header>
 
   <!-- ===== KPI strip ===== -->
-  <section class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
-    <div class="card rounded-lg p-3">
+  <section class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 mb-4">
+    <div class="card rounded-lg p-3 kpi-verdict">
       <div class="text-[11px] uppercase tracking-wider text-slate-400 mb-1">Verdict</div>
       <div id="liveVerdict" class="text-lg font-bold text-white">–</div>
     </div>
@@ -59,6 +66,14 @@ button{min-height:40px}
     <div class="card rounded-lg p-3">
       <div class="text-[11px] uppercase tracking-wider text-slate-400 mb-1">Networks</div>
       <div id="netKpi" class="text-lg font-bold text-white">–</div>
+    </div>
+    <div class="card rounded-lg p-3">
+      <div class="text-[11px] uppercase tracking-wider text-slate-400 mb-1">External IPs</div>
+      <div id="ipKpi" class="text-lg font-bold text-white">–</div>
+    </div>
+    <div class="card rounded-lg p-3">
+      <div class="text-[11px] uppercase tracking-wider text-slate-400 mb-1">Suspicious IPs</div>
+      <div id="ipRiskKpi" class="text-lg font-bold text-white">–</div>
     </div>
     <div class="card rounded-lg p-3">
       <div class="text-[11px] uppercase tracking-wider text-slate-400 mb-1">LAN devices</div>
@@ -75,18 +90,24 @@ button{min-height:40px}
     <button data-tab="overview" class="tabbtn active whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">Overview</button>
     <button data-tab="networks" class="tabbtn whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">Networks <span id="netTabBadge" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-slate-800 text-slate-300"></span></button>
     <button data-tab="devices" class="tabbtn whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">Devices <span id="devTabBadge" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-slate-800 text-slate-300"></span></button>
+    <button data-tab="ipintel" class="tabbtn whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">IP Intel <span id="ipTabBadge" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-slate-800 text-slate-300"></span></button>
     <button data-tab="intel" class="tabbtn whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">AI &amp; Telemetry</button>
     <button data-tab="timeline" class="tabbtn whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">Timeline</button>
   </nav>
 
   <!-- ===== Overview ===== -->
   <div id="tab-overview">
+    <div id="ipAlertBanner" class="hidden"></div>
     <div id="policyBanner" class="hidden"></div>
     <div id="rogueBanner" class="hidden"></div>
     <div id="diagPanel" class="hidden"></div>
     <section class="card rounded-lg p-4 mb-4">
       <h2 class="font-bold text-white mb-3">Connection</h2>
-      <div id="liveCards" class="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm"></div>
+      <div id="liveCards" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 text-sm"></div>
+      <div class="flex flex-wrap items-center gap-2 mt-3 text-sm">
+        <button id="btnSpeed" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs font-bold text-slate-200">Measure throughput</button>
+        <span id="speedOut" class="text-xs text-slate-400"></span>
+      </div>
     </section>
     <div class="grid lg:grid-cols-2 gap-4 mb-4">
       <section class="card rounded-lg p-4">
@@ -101,6 +122,13 @@ button{min-height:40px}
         <div class="panel rounded p-3"><b class="text-white">What to do</b><ul id="liveRecs" class="list-disc ml-5 mt-1 text-slate-300"></ul></div>
       </section>
     </div>
+    <section class="card rounded-lg p-4 mb-4">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+        <h2 class="font-bold text-white">Health trend <span id="healthMeta" class="text-xs font-normal text-slate-400"></span></h2>
+        <span class="text-xs text-slate-500">Passive samples recorded about once a minute</span>
+      </div>
+      <div id="healthSpark" class="grid sm:grid-cols-3 gap-3"></div>
+    </section>
   </div>
 
   <!-- ===== Networks ===== -->
@@ -114,6 +142,14 @@ button{min-height:40px}
       <div class="grid lg:grid-cols-5 gap-4 mb-4">
         <div class="lg:col-span-2"><canvas id="radar" class="w-full rounded bg-[#0a1424] border border-slate-800" style="aspect-ratio:1"></canvas></div>
         <div class="min-w-0 lg:col-span-3">
+          <div class="flex flex-wrap items-center gap-2 mb-2">
+            <input id="netSearch" placeholder="filter networks…" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 flex-1 min-w-[10rem]">
+            <select id="netFilter" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200">
+              <option value="all">All verdicts</option><option value="avoid">Avoid</option>
+              <option value="caution">Caution</option><option value="connect">Safe</option>
+              <option value="blocked">Blocked</option><option value="open">Open networks</option>
+            </select>
+          </div>
           <div class="overflow-x-auto max-h-[420px] overflow-y-auto rounded border border-slate-800"><table class="w-full text-sm rtable">
             <thead class="text-slate-400 text-xs uppercase sticky top-0 bg-slate-900"><tr><th class="text-left p-2">Network</th><th class="text-left p-2">Security</th><th class="text-left p-2">Ch</th><th class="text-left p-2">Signal</th><th class="text-left p-2">Verdict</th><th class="text-right p-2">Score</th></tr></thead>
             <tbody id="radarList"></tbody>
@@ -128,16 +164,84 @@ button{min-height:40px}
   <!-- ===== Devices ===== -->
   <div id="tab-devices" class="hidden">
     <section class="card rounded-lg p-4 mb-4">
-      <div class="flex items-center justify-between mb-2">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
         <h2 class="font-bold text-white">Devices on your network (<span id="lanCount2">0</span>)</h2>
-        <button id="btnScan" class="bg-sky-600 hover:bg-sky-500 text-white px-4 py-2 rounded text-sm">Deep scan</button>
+        <div class="flex gap-2">
+          <input id="devSearch" placeholder="filter ip / mac / host…" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 w-44">
+          <button id="btnScan" class="bg-sky-600 hover:bg-sky-500 text-white px-4 py-2 rounded text-sm">Deep scan</button>
+        </div>
       </div>
       <div class="overflow-x-auto max-h-96 overflow-y-auto"><table class="w-full text-sm rtable">
-        <thead class="text-slate-400 text-xs uppercase"><tr><th class="text-left p-2">IP</th><th class="text-left p-2">MAC</th><th class="text-left p-2">Hostname</th><th class="text-left p-2"></th><th class="text-left p-2">Action</th></tr></thead>
+        <thead class="text-slate-400 text-xs uppercase"><tr><th class="text-left p-2">IP</th><th class="text-left p-2">MAC</th><th class="text-left p-2">Vendor / role</th><th class="text-left p-2">Host</th><th class="text-left p-2"></th><th class="text-left p-2">Action</th></tr></thead>
         <tbody id="lanRows"></tbody>
       </table></div>
       <p id="lanMeta" class="text-xs text-slate-500 mt-2"></p>
     </section>
+  </div>
+
+  <!-- ===== IP Intelligence ===== -->
+  <div id="tab-ipintel" class="hidden">
+    <section class="card rounded-lg p-4 mb-4">
+      <h2 class="font-bold text-white mb-1">IP purpose intelligence</h2>
+      <p class="text-xs text-slate-400 mb-3">What is an address <i>for</i>, and is that purpose surprising here? Purpose and reputation are indicators derived from local signals — never proof.</p>
+      <div class="flex flex-wrap items-end gap-2">
+        <label class="text-xs text-slate-400 flex-1 min-w-[12rem]">Address
+          <input id="ipInput" placeholder="e.g. 1.2.3.4" class="mt-1 w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 mono text-slate-200">
+        </label>
+        <button id="btnLookup" class="bg-sky-600 hover:bg-sky-500 text-white px-4 py-1 rounded text-sm font-bold">Investigate</button>
+        <button id="btnWatch" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-sm">Watch</button>
+        <button id="btnFeeds" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-sm">Refresh reputation feeds</button>
+      </div>
+      <div id="ipSources" class="mt-3 text-xs text-slate-400"></div>
+      <div id="ipLookupResult" class="mt-3"></div>
+    </section>
+
+    <section class="card rounded-lg p-4 mb-4">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+        <h2 class="font-bold text-white">External peers observed <span id="ipObsMeta" class="text-xs font-normal text-slate-400"></span></h2>
+        <div class="flex flex-wrap gap-2">
+          <input id="ipSearch" placeholder="filter ip / purpose / org…" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 w-52">
+          <select id="ipFilter" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200">
+            <option value="all">All</option><option value="avoid">Avoid</option>
+            <option value="caution">Caution</option><option value="connect">Low score</option>
+            <option value="hostile">Hostile purpose</option><option value="interesting">Interesting purpose</option>
+            <option value="shared">Shared infrastructure</option><option value="watch">Watchlisted</option>
+          </select>
+        </div>
+      </div>
+      <div id="ipSummary" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3"></div>
+      <div class="overflow-x-auto max-h-[440px] overflow-y-auto rounded border border-slate-800"><table class="w-full text-sm rtable">
+        <thead class="text-slate-400 text-xs uppercase sticky top-0 bg-slate-900">
+          <tr>
+            <th class="text-left p-2 cursor-pointer" data-sort="ip">Address</th>
+            <th class="text-left p-2 cursor-pointer" data-sort="purpose">Purpose</th>
+            <th class="text-left p-2 cursor-pointer" data-sort="score">Risk</th>
+            <th class="text-left p-2 cursor-pointer" data-sort="org">Organisation</th>
+            <th class="text-left p-2">Location</th>
+            <th class="text-left p-2">Reputation</th>
+            <th class="text-left p-2">Ports</th>
+            <th class="text-left p-2">Program</th>
+            <th class="text-left p-2 cursor-pointer" data-sort="last_seen">Last seen</th>
+          </tr>
+        </thead>
+        <tbody id="ipRows"></tbody>
+      </table></div>
+      <p class="text-xs text-slate-500 mt-2" id="ipObsNote"></p>
+    </section>
+
+    <div class="grid lg:grid-cols-2 gap-4 mb-4">
+      <section class="card rounded-lg p-4">
+        <h2 class="font-bold text-white mb-2">Selected address</h2>
+        <div id="ipDetail" class="text-sm panel rounded p-3 max-h-[70vh] overflow-y-auto"><span class="text-slate-500">Select an address</span></div>
+      </section>
+      <section class="card rounded-lg p-4">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <h2 class="font-bold text-white">IP alerts <span id="ipAlertCount" class="text-xs font-normal text-slate-400"></span></h2>
+          <button id="btnAckAll" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-1 rounded text-xs font-bold">Acknowledge all</button>
+        </div>
+        <div id="ipAlertList" class="text-sm space-y-1 max-h-[70vh] overflow-y-auto"></div>
+      </section>
+    </div>
   </div>
 
   <!-- ===== AI & Telemetry ===== -->
@@ -159,7 +263,7 @@ button{min-height:40px}
     <section class="card rounded-lg p-4 mb-4">
       <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
         <h2 class="font-bold text-white">Packet and flow telemetry <span id="pktDot" class="text-xs text-slate-400">checking…</span></h2>
-        <button id="btnProbe" class="bg-sky-600 hover:bg-sky-500 text-white px-4 py-2 rounded text-sm">Measure loss</button>
+        <button id="btnProbe" class="bg-sky-600 hover:bg-sky-500 text-white px-4 py-1 rounded text-sm">Measure loss</button>
       </div>
       <div id="pktCards" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3"></div>
       <p id="pktMeta" class="text-xs text-slate-500 mb-3"></p>
@@ -183,7 +287,12 @@ button{min-height:40px}
     <section class="card rounded-lg p-4 mb-4">
       <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
         <h2 class="font-bold text-white">Incident timeline and verification</h2>
-        <div class="flex items-center gap-2 text-sm">
+        <div class="flex flex-wrap items-center gap-2 text-sm">
+          <select id="tlFilter" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200">
+            <option value="all">Everything</option><option value="ip_alert">IP alerts</option>
+            <option value="incident">Incidents</option><option value="event">Events</option>
+            <option value="open">Unacknowledged only</option>
+          </select>
           <label class="text-xs text-slate-400">Window <select id="verifyWindow" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-200"><option value="15">15 min</option><option value="30" selected>30 min</option><option value="60">60 min</option></select></label>
           <button id="btnVerify" class="bg-sky-600 hover:bg-sky-500 text-white px-3 py-1 rounded text-sm">Verify recovery</button>
         </div>
@@ -198,65 +307,161 @@ button{min-height:40px}
   </footer>
 </div>
 <script>
-const api = (p, o={}) => fetch(p, {headers:{'Content-Type':'application/json'}, ...o}).then(r=>r.json());
+/* ================= helpers ================= */
 const esc = s => String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const chkIcon = s => s==='pass'?'✅':s==='warn'?'⚠️':'❌';
+const arr = v => Array.isArray(v)?v:[];
+const obj = v => (v && typeof v==='object')?v:{};
+const num = v => (typeof v==='number' && isFinite(v))?v:null;
 
-// ---------- tabs + clock ----------
-document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{
-  document.querySelectorAll('[data-tab]').forEach(x=>x.classList.remove('active'));
-  b.classList.add('active');
-  ['overview','networks','devices','intel','timeline'].forEach(t=>document.getElementById('tab-'+t).classList.toggle('hidden', t!==b.dataset.tab));
-});
+let apiFail = 0;
+const api = async (p, o={}) => {
+  const {timeout=20000, ...rest} = o;
+  const ctrl = new AbortController();
+  const t = setTimeout(()=>ctrl.abort(), timeout);
+  try{
+    const r = await fetch(p, {headers:{'Content-Type':'application/json'}, ...rest, signal:ctrl.signal});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const j = await r.json();
+    apiFail = 0; setApiDot();
+    return j;
+  } finally { clearTimeout(t); }
+};
+function setApiDot(){
+  const d = document.getElementById('apiDot');
+  if(!d) return;
+  if(apiFail){ d.textContent = '· backend unreachable — retrying'; d.className='text-xs text-red-400'; }
+  else { d.textContent=''; d.className='text-xs text-slate-600'; }
+}
+const on = (id, ev, fn) => { const e=document.getElementById(id); if(e) e.addEventListener(ev, fn); };
+
+/* ================= tabs + polling ================= */
+const TABS = ['overview','networks','devices','ipintel','intel','timeline'];
+let activeTab = 'overview';
+const SCHEDULE = {
+  overview: [['refreshLive',8000],['refreshHealth',20000]],
+  networks: [['loadRadar',12000]],
+  devices:  [],
+  ipintel:  [['refreshIPIntel',10000],['refreshIPAlerts',15000]],
+  intel:    [['refreshAI',10000],['refreshPacket',30000],['refreshCapture',15000]],
+  timeline: [['refreshTimeline',15000]],
+};
+const lastRun = {};
+function switchTab(name){
+  activeTab = name;
+  document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('active', x.dataset.tab===name));
+  TABS.forEach(t=>{ const e=document.getElementById('tab-'+t); if(e) e.classList.toggle('hidden', t!==name); });
+  runNow();
+}
+document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
+function runNow(){
+  (SCHEDULE[activeTab]||[]).forEach(([fn])=>{ lastRun[fn]=0; });
+  tick();
+}
+function tick(){
+  const now = Date.now();
+  (SCHEDULE[activeTab]||[]).forEach(([fn,ms])=>{
+    if(!lastRun[fn] || now-lastRun[fn] >= ms){
+      lastRun[fn]=now;
+      const f = window[fn];
+      if(typeof f === 'function'){ Promise.resolve(f()).catch(()=>{}); }
+    }
+  });
+}
+setInterval(tick, 1000);
 setInterval(()=>{ const c=document.getElementById('clock'); if(c) c.textContent = new Date().toLocaleTimeString(); },1000);
 
+/* ================= live / overview ================= */
 async function refreshLive(){
   let s;
-  try{ s = await api('/api/real/status'); }catch(e){ return; }
+  try{ s = await api('/api/real/status'); }
+  catch(e){ apiFail++; setApiDot(); const d=document.getElementById('liveDot'); if(d){d.textContent='unreachable';d.className='text-xs text-red-400';} return; }
   const dot = document.getElementById('liveDot');
-  if(!s.live){ dot.textContent = 'unavailable on this host'; return; }
-  const w = s.wifi, ip = s.ip, r = s.risk;
-  dot.textContent = '● live'; dot.className = 'text-xs text-green-400';
-  document.getElementById('liveVerdict').textContent = (r.level==='low'?'🟢 ':r.level==='caution'?'🟡 ':r.level==='high'?'🟠 ':'🔴 ') + r.verdict;
+  if(!s.live){ if(dot){ dot.textContent='unavailable on this host'; dot.className='text-xs text-yellow-400'; } return; }
+  const w = obj(s.wifi), ip = obj(s.ip), r = obj(s.risk);
+  if(dot){ dot.textContent='● live'; dot.className='text-xs text-green-400'; }
+  const lvl = r.level;
+  const v = document.getElementById('liveVerdict');
+  if(v){ v.textContent = (lvl==='low'?'🟢 ':lvl==='caution'?'🟡 ':lvl==='high'?'🟠 ':'🔴 ') + (r.verdict||'–'); }
   const sig = w.signal_dbm!=null ? `${w.signal_dbm} dBm` : 'n/a';
-  document.getElementById('liveCards').innerHTML = [
-    ['Network', w.connected?`📶 <b class="text-white">${esc(w.ssid)}</b>`:'Not connected'],
+  const cards = [
+    ['Network', w.connected?`📶 <b class="text-white">${esc(w.ssid||'—')}</b>`:'Not connected'],
     ['Security', `<b class="text-white">${esc(w.security||'–')}</b>${w.band?` · ${esc(w.band)}`:''}${w.channel?` · ch ${esc(w.channel)}`:''}`],
     ['Signal', `<b class="text-white">${sig}</b>${w.rate_mbps?` · ${w.rate_mbps} Mbps`:''}${w.phy?` · ${esc(w.phy)}`:''}`],
-    ['IP / Gateway', `<span class="mono">${esc(ip.ip||'–')}</span> → <span class="mono">${esc(ip.gateway||'–')}</span>${s.gateway_ms!=null?` · ${s.gateway_ms.toFixed(1)} ms`:''}`],
+    ['IP / Gateway', `<span class="mono">${esc(ip.ip||'–')}</span> → <span class="mono">${esc(ip.gateway||'–')}</span>${s.gateway_ms!=null?` · ${Number(s.gateway_ms).toFixed(1)} ms`:''}`],
     ['MAC', `<span class="mono">${esc(w.mac||'n/a')}</span>`],
-  ].map(([k,v])=>`<div class="panel rounded p-2"><div class="text-xs text-slate-400">${k}</div><div class="text-slate-200">${v}</div></div>`).join('');
-  document.getElementById('liveChecks').innerHTML = s.checks.map(c=>
-    `<tr class="border-t border-slate-800"><td class="p-2" data-l="Check">${esc(c.name)}</td><td class="p-2" data-l="Result">${chkIcon(c.status)} ${c.status.toUpperCase()}</td><td class="p-2 text-slate-400" data-l="Detail">${esc(c.detail)}</td></tr>`).join('');
-  document.getElementById('liveReasons').innerHTML = r.reasons.length? r.reasons.map(x=>`<li>${esc(x)}</li>`).join('') : '<li class="list-none">No issues found.</li>';
-  document.getElementById('liveRecs').innerHTML = r.recommendations.map(x=>`<li>${esc(x)}</li>`).join('');
+    ['DNS', obj(ip.dns).length ? `<span class="mono text-xs">${esc(arr(ip.dns).slice(0,2).join(', '))}</span>${s.dns_ms!=null?` · ${Number(s.dns_ms).toFixed(0)} ms`:''}` : 'n/a'],
+  ];
+  const lc = document.getElementById('liveCards');
+  if(lc) lc.innerHTML = cards.map(([k,val])=>`<div class="panel rounded p-2"><div class="text-xs text-slate-400">${k}</div><div class="text-slate-200">${val}</div></div>`).join('');
+  const chk = document.getElementById('liveChecks');
+  if(chk) chk.innerHTML = arr(s.checks).map(c=>
+    `<tr class="border-t border-slate-800"><td class="p-2" data-l="Check">${esc(c.name)}</td><td class="p-2" data-l="Result">${chkIcon(c.status)} ${esc(String(c.status||'').toUpperCase())}</td><td class="p-2 text-slate-400" data-l="Detail">${esc(c.detail)}</td></tr>`).join('');
+  const rs = document.getElementById('liveReasons');
+  if(rs) rs.innerHTML = arr(r.reasons).length ? arr(r.reasons).map(x=>`<li>${esc(x)}</li>`).join('') : '<li class="list-none">No issues found.</li>';
+  const rc = document.getElementById('liveRecs');
+  if(rc) rc.innerHTML = arr(r.recommendations).map(x=>`<li>${esc(x)}</li>`).join('');
 }
-
-async function refreshLan(mode='fast', fresh=0){
-  const meta = document.getElementById('lanMeta');
-  meta.textContent = mode==='full' ? 'Scanning subnet… (~10s)' : 'Loading…';
-  try{
-    const r = await api(`/api/real/devices?mode=${mode}&fresh=${fresh}`);
-    document.getElementById('lanCount').textContent = r.devices.length;
-    const c2 = document.getElementById('lanCount2'); if(c2) c2.textContent = r.devices.length;
-    const badge = document.getElementById('devTabBadge'); if(badge) badge.textContent = r.devices.length;
-    document.getElementById('lanRows').innerHTML = r.devices.map(d=>
-      `<tr class="border-t border-slate-800"><td class="p-2 mono" data-l="IP">${esc(d.ip)}</td><td class="p-2 mono text-xs" data-l="MAC">${esc(d.mac||'–')}</td>
-       <td class="p-2 text-xs" data-l="Host">${esc(d.hostname||'–')}</td>
-       <td class="p-2 text-xs" data-l="Role">${d.is_self?'💻 you':d.is_gateway?'🌐 router':''}</td>
-       <td class="p-2 text-xs" data-l="Act">${d.flagged?'🚩 flagged':(!d.is_self&&!d.is_gateway?`<button data-flag="${esc(d.ip)}" data-mac="${esc(d.mac||'')}" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs font-bold">Flag</button>`:'')}</td></tr>`).join('') || '<tr><td class="p-2 text-slate-500">No devices found.</td></tr>';
-    meta.textContent = `${r.devices.length} device(s) · ${r.mode} scan${r.cached?' · cached':` · ${(r.scan_ms/1000).toFixed(1)}s`}${r.gateway?` · true isolation needs a MAC block on your router at ${r.gateway}`:''}`;
-  }catch(e){ meta.textContent = 'Scan failed.'; }
-}
-document.getElementById('btnScan').onclick = () => refreshLan('full', 1);
-document.getElementById('btnDisconnect').onclick = async () => {
+on('btnSpeed','click', async ()=>{
+  const out=document.getElementById('speedOut'); if(out) out.textContent='Measuring…';
+  try{ const r = await api('/api/real/speedtest',{method:'POST',timeout:45000});
+    if(out) out.textContent = r.ok && r.speed_mbps!=null ? `${r.speed_mbps} Mbps down (best-effort probe)` : 'Throughput probe unavailable on this host.';
+  }catch(e){ if(out) out.textContent='Throughput probe failed.'; }
+});
+on('btnDisconnect','click', async () => {
   if(!confirm('Turn Wi-Fi OFF on this computer? (manual emergency action — auto-protect never does this by itself)')) return;
-  await api('/api/real/disconnect',{method:'POST'});
+  try{ await api('/api/real/disconnect',{method:'POST'}); }catch(e){}
   refreshLive();
-};
+});
 
-// ---------- radar (inline) ----------
+/* ================= health sparklines ================= */
+function sparkline(points, color, invert){
+  if(!points.length) return '<div class="panel rounded p-2 text-xs text-slate-500">no samples</div>';
+  const vals = points.map(p=>p.v).filter(v=>v!=null && isFinite(v));
+  if(vals.length < 2) return '<div class="panel rounded p-2 text-xs text-slate-500">not enough samples</div>';
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const span = (max-min) || 1;
+  const W = 220, H = 44, pad = 3;
+  const pts = points.map((p,i)=>{
+    if(p.v==null) return null;
+    const x = pad + (i/(points.length-1))*(W-pad*2);
+    const t = (p.v-min)/span;
+    const y = H-pad - (invert ? t : (1-t))*(H-pad*2);
+    return [x,y];
+  }).filter(Boolean);
+  const d = pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+  const area = d + ` L ${pts[pts.length-1][0].toFixed(1)} ${H} L ${pts[0][0].toFixed(1)} ${H} Z`;
+  const id = 'sg'+Math.random().toString(36).slice(2,8);
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${color}" stop-opacity=".35"/><stop offset="1" stop-color="${color}" stop-opacity="0"/>
+    </linearGradient></defs>
+    <path d="${area}" fill="url(#${id})"/><path d="${d}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round"/>
+    <circle cx="${pts[pts.length-1][0].toFixed(1)}" cy="${pts[pts.length-1][1].toFixed(1)}" r="2.4" fill="${color}"/></svg>`;
+}
+async function refreshHealth(){
+  let d; try{ d = await api('/api/real/health/history?limit=60'); }catch(e){ return; }
+  const h = arr(d.history);
+  const el = document.getElementById('healthSpark'); if(!el) return;
+  const meta = document.getElementById('healthMeta');
+  if(meta) meta.textContent = h.length ? `${h.length} samples` : '';
+  if(!h.length){ el.innerHTML = '<div class="panel rounded p-2 text-xs text-slate-500">Waiting for the first health sample…</div>'; return; }
+  const mk = (label, key, color, invert, fmt) => {
+    const pts = h.map(x=>({v: x[key]==null?null:Number(x[key])}));
+    const last = pts.length?pts[pts.length-1].v:null;
+    return `<div class="panel rounded p-2"><div class="text-xs text-slate-400">${label}</div>
+      <div class="text-white font-bold text-sm">${last==null?'n/a':fmt(last)}</div>${sparkline(pts,color,invert)}</div>`;
+  };
+  el.innerHTML = [
+    mk('Gateway latency (ms)','gateway_ms','#38bdf8',false,v=>v.toFixed(0)),
+    mk('Packet loss (%)','loss_pct','#f97316',false,v=>v.toFixed(1)),
+    mk('Signal (dBm)','signal_dbm','#22c55e',true,v=>v.toFixed(0)),
+  ].join('');
+}
+
+/* ================= radar ================= */
 let radarNets = [], radarSel = null, radarRAF = null, radarAngle = 0;
+let netQuery = '', netFilter = 'all';
 const vColor = v => v==='connect'?'#22c55e':v==='caution'?'#eab308':'#ef4444';
 const vBadge = v => v==='connect'?'🟢 SAFE TO CONNECT':v==='caution'?'🟡 CAUTION':'🔴 AVOID';
 const hashStr = s => { let h=0; for(const c of String(s)) h=(h*31 + c.codePointAt(0))>>>0; return h; };
@@ -268,7 +473,8 @@ function radarGeom(n, i, R){
 }
 function drawRadar(){
   const cv = document.getElementById('radar');
-  if(!cv){ return; }
+  if(!cv) return;
+  if(activeTab !== 'networks' || document.hidden){ radarRAF = requestAnimationFrame(drawRadar); return; }
   if(!radarNets.length){ radarRAF = requestAnimationFrame(drawRadar); return; }
   const size = cv.clientWidth || 400, dpr = window.devicePixelRatio||1;
   if(cv.width !== size*dpr){ cv.width = size*dpr; cv.height = size*dpr; }
@@ -286,7 +492,7 @@ function drawRadar(){
   const ga = radarAngle*Math.PI/180;
   ctx.save(); ctx.translate(cx,cy); ctx.rotate(ga);
   const tg = ctx.createLinearGradient(0,0,R,0); tg.addColorStop(0,'rgba(56,189,248,0)'); tg.addColorStop(1,'rgba(56,189,248,.55)');
-  ctx.strokeStyle = tg; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(R,0); ctx.stroke(); ctx.restore();
+  ctx.strokeStyle=tg; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(R,0); ctx.stroke(); ctx.restore();
   radarNets.forEach((n,i)=>{
     const g = radarGeom(n,i,R), x = cx+g.x-R, y = cy+g.y-R;
     n._x = x; n._y = y;
@@ -294,7 +500,10 @@ function drawRadar(){
     ctx.globalAlpha = Math.max(0.45, 1 - dA/120);
     ctx.beginPath(); ctx.arc(x,y, radarSel===n.ssid?8:5.5, 0, 7);
     ctx.fillStyle = vColor(n.recommendation.verdict); ctx.fill();
-    if(radarSel===n.ssid){ ctx.strokeStyle='#e2e8f0'; ctx.lineWidth=1.5; ctx.stroke(); }
+    // shape redundancy: avoid = square, caution = triangle, safe = circle
+    if(n.recommendation.verdict === 'avoid'){ ctx.fillRect(x-4.5,y-4.5,9,9); }
+    else if(n.recommendation.verdict === 'caution'){ ctx.beginPath(); ctx.moveTo(x,y-6); ctx.lineTo(x+5.5,y+4); ctx.lineTo(x-5.5,y+4); ctx.closePath(); ctx.fill(); }
+    if(radarSel===n.ssid){ ctx.strokeStyle='#e2e8f0'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(x,y,9,0,7); ctx.stroke(); }
     if(n.is_current){ ctx.globalAlpha=1; ctx.beginPath(); ctx.arc(x,y,10,0,7); ctx.strokeStyle='#38bdf8'; ctx.stroke(); }
     ctx.globalAlpha = 1;
     ctx.fillStyle = '#cbd5e1'; ctx.font = '10px sans-serif';
@@ -304,12 +513,14 @@ function drawRadar(){
   radarRAF = requestAnimationFrame(drawRadar);
 }
 function radarDetailHTML(n){
-  const r = n.recommendation;
+  const r = obj(n.recommendation);
   const sevChip = s => s==='high'?'<span class="px-1 rounded" style="background:#7f1d1d;color:#fecaca">HIGH</span>':s==='medium'?'<span class="px-1 rounded" style="background:#713f12;color:#fde68a">MED</span>':'<span class="px-1 rounded bg-slate-700 text-slate-300">LOW</span>';
+  const verdict = r.verdict || 'connect';
+  const score = num(n.score) ?? 0;
   return `<div class="font-bold text-base mb-1 text-white">${esc(n.ssid)||'<i>hidden SSID</i>'} ${n.is_current?'<span class="text-sky-400 text-xs">● yours</span>':''}</div>
-  <div class="mb-2 font-bold" style="color:${vColor(r.verdict)}">${vBadge(r.verdict)}</div>
-  <div class="flex items-center gap-2 mb-1 text-sm"><b class="text-white">RISK ${n.score ?? '?'}/100</b>
-    <div class="flex-1 bg-slate-700 rounded h-2"><div class="h-2 rounded" style="width:${n.score ?? 0}%;background:${vColor(r.verdict)}"></div></div>
+  <div class="mb-2 font-bold" style="color:${vColor(verdict)}">${vBadge(verdict)}</div>
+  <div class="flex items-center gap-2 mb-1 text-sm"><b class="text-white">RISK ${score}/100</b>
+    <div class="flex-1 bg-slate-700 rounded h-2"><div class="h-2 rounded" style="width:${score}%;background:${vColor(verdict)}"></div></div>
   </div>
   <div class="flex flex-wrap items-center gap-2 mb-2 text-xs">
     ${n.blocked
@@ -318,105 +529,571 @@ function radarDetailHTML(n){
     ${n.preferred && !n.blocked ? '<span class="text-slate-400">· in preferred list (auto-joins)</span>' : ''}
     ${n.is_current ? '<span class="text-slate-400">· connected right now</span>' : ''}
   </div>
-  <ul class="list-disc ml-5 mb-2 text-slate-300">${r.reasons.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>
+  <ul class="list-disc ml-5 mb-2 text-slate-300">${arr(r.reasons).map(x=>`<li>${esc(x)}</li>`).join('')}</ul>
   <div class="grid grid-cols-2 gap-1 text-xs mb-2 text-slate-300">
-    <div>📶 Signal <b>${n.signal_dbm??'–'} dBm</b></div><div>📍 ${esc(n.proximity.detail)}</div>
-    <div>🔐 ${esc(n.security)}</div><div>📻 Ch ${esc(n.channel)} ${esc(n.band||'')}</div>
+    <div>📶 Signal <b>${n.signal_dbm??'–'} dBm</b></div><div>📍 ${esc(obj(n.proximity).detail||'')}</div>
+    <div>🔐 ${esc(n.security||'')}</div><div>📻 Ch ${esc(n.channel||'')} ${esc(n.band||'')}</div>
   </div>
-  <b class="text-white">Threat analysis (${n.threats.length})</b>
-  ${n.threats.map(t=>`<div class="bg-slate-800 border border-slate-700 rounded p-2 mt-1">
+  <b class="text-white">Threat analysis (${arr(n.threats).length})</b>
+  ${arr(n.threats).map(t=>`<div class="bg-slate-800 border border-slate-700 rounded p-2 mt-1">
     <div class="font-bold text-slate-200">${esc(t.name)} ${sevChip(t.severity)}</div>
     <div class="text-xs text-slate-500 mt-1">HOW IT WORKS</div>
-    <ol class="list-decimal ml-4 text-xs text-slate-300">${t.how.map(h=>`<li>${esc(h)}</li>`).join('')}</ol>
+    <ol class="list-decimal ml-4 text-xs text-slate-300">${arr(t.how).map(h=>`<li>${esc(h)}</li>`).join('')}</ol>
     <div class="text-xs text-slate-500 mt-1">ATTACKER NEEDS</div>
-    <div class="text-xs">${t.params.map(p=>`<span class="inline-block bg-slate-700 border border-slate-600 text-slate-200 rounded px-1 mr-1 mb-1 mono">${esc(p)}</span>`).join('')}</div>
+    <div class="text-xs">${arr(t.params).map(p=>`<span class="inline-block bg-slate-700 border border-slate-600 text-slate-200 rounded px-1 mr-1 mb-1 mono">${esc(p)}</span>`).join('')}</div>
     <div class="text-xs text-slate-500 mt-1">STAY SAFE</div>
-    <ul class="list-disc ml-4 text-xs text-green-400">${t.defense.map(d=>`<li>${esc(d)}</li>`).join('')}</ul>
+    <ul class="list-disc ml-4 text-xs text-green-400">${arr(t.defense).map(d=>`<li>${esc(d)}</li>`).join('')}</ul>
   </div>`).join('')}`;
 }
+function filteredNets(){
+  const q = netQuery.toLowerCase();
+  return radarNets.filter(n=>{
+    if(netFilter === 'avoid' || netFilter === 'caution' || netFilter === 'connect'){
+      if(obj(n.recommendation).verdict !== netFilter) return false;
+    }
+    if(netFilter === 'blocked' && !n.blocked) return false;
+    if(netFilter === 'open' && !String(n.security||'').toLowerCase().startsWith('open')) return false;
+    if(q){
+      const hay = [n.ssid,n.security,n.channel,n.band,obj(n.proximity).detail].join(' ').toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
 async function loadRadar(){
-  try{
-    const r = await api('/api/real/radar');
-    radarNets = r.networks;
-    document.getElementById('radarMeta').textContent = `${r.count} networks · ${r.summary.avoid} avoid / ${r.summary.caution} caution / ${r.summary.connect} safe · ${new Date(r.scanned_at*1000).toLocaleTimeString()}`;
-    const nk = document.getElementById('netKpi');
-    if(nk) nk.innerHTML = `<span class="text-red-400">${r.summary.avoid}</span><span class="text-slate-500 text-sm"> avoid · </span><span class="text-yellow-400">${r.summary.caution}</span><span class="text-slate-500 text-sm"> caution · </span><span class="text-green-400">${r.summary.connect}</span><span class="text-slate-500 text-sm"> safe</span>`;
-    const badge = document.getElementById('netTabBadge'); if(badge) badge.textContent = r.summary.avoid ? r.summary.avoid + ' avoid' : r.count;
-    if(!radarSel || !radarNets.some(n=>n.ssid===radarSel)) radarSel = (radarNets.find(n=>n.is_current)||radarNets[0])?.ssid;
-    document.getElementById('radarList').innerHTML = radarNets.map(n=>{
-      const sig = n.signal_dbm ?? -90;
-      const pct = Math.max(2, Math.min(100, Math.round((-25 - sig) / 70 * 100)));
-      const pill = n.recommendation.verdict==='connect' ? 'background:#14532d;color:#bbf7d0' : n.recommendation.verdict==='caution' ? 'background:#713f12;color:#fde68a' : 'background:#7f1d1d;color:#fecaca';
-      const sel = radarSel===n.ssid ? 'background:#1e293b;' : '';
-      return `<tr data-ssid="${esc(n.ssid)}" class="rlink border-t border-slate-800 hover:bg-slate-800/70 cursor-pointer" style="${sel}">
-       <td class="p-2" data-l="Network"><span style="color:${vColor(n.recommendation.verdict)}">●</span> <b class="text-slate-200">${esc(n.ssid)||'<i>hidden</i>'}</b>${n.is_current?' <span class="text-sky-400 text-xs">yours</span>':''}${n.blocked?' <span class="text-red-400 text-xs font-bold">BLOCKED</span>':''}</td>
-       <td class="p-2 text-slate-300" data-l="Security">${esc(n.security||'–')}</td>
-       <td class="p-2 text-slate-400" data-l="Ch">${esc(n.channel||'–')}</td>
-       <td class="p-2" data-l="Signal"><span class="text-slate-300 text-xs">${n.signal_dbm??'–'} dBm</span><div class="w-16 bg-slate-700 rounded h-1 mt-1"><div class="h-1 rounded" style="width:${pct}%;background:${vColor(n.recommendation.verdict)}"></div></div></td>
-       <td class="p-2" data-l="Verdict"><span class="px-1.5 py-0.5 rounded text-xs font-bold" style="${pill}">${n.recommendation.verdict.toUpperCase()}</span></td>
-       <td class="p-2 text-right mono text-slate-200" data-l="Score">${n.score}</td></tr>`;}).join('');
-    document.querySelectorAll('.rlink').forEach(b=>b.onclick=()=>{ radarSel=b.dataset.ssid; document.querySelectorAll('.rlink').forEach(x=>x.style.background = x.dataset.ssid===radarSel ? '#1e293b' : ''); renderRadarSel(); });
-    renderRadarSel();
-    const pb = document.getElementById('policyBanner');
-    const pend = r.pending_blocks || [];
-    const blocked = (r.policy && r.policy.blocked) || [];
+  let r;
+  try{ r = await api('/api/real/radar',{timeout:30000}); }
+  catch(e){ const m=document.getElementById('radarMeta'); if(m) m.textContent='scan failed — backend unreachable'; return; }
+  radarNets = arr(r.networks);
+  const meta = document.getElementById('radarMeta');
+  const sum = obj(r.summary);
+  if(meta) meta.textContent = `${r.count} networks · ${sum.avoid||0} avoid / ${sum.caution||0} caution / ${sum.connect||0} safe · ${new Date((r.scanned_at||0)*1000).toLocaleTimeString()}`;
+  const nk = document.getElementById('netKpi');
+  if(nk) nk.innerHTML = `<span class="text-red-400">${sum.avoid||0}</span><span class="text-slate-500 text-sm"> avoid · </span><span class="text-yellow-400">${sum.caution||0}</span><span class="text-slate-500 text-sm"> caution · </span><span class="text-green-400">${sum.connect||0}</span><span class="text-slate-500 text-sm"> safe</span>`;
+  const badge = document.getElementById('netTabBadge'); if(badge) badge.textContent = sum.avoid ? sum.avoid + ' avoid' : (r.count||0);
+  if(!radarSel || !radarNets.some(n=>n.ssid===radarSel)) radarSel = (radarNets.find(n=>n.is_current)||radarNets[0]||{}).ssid;
+  const rows = filteredNets();
+  const rl = document.getElementById('radarList');
+  if(rl) rl.innerHTML = rows.map(n=>{
+    const sig = n.signal_dbm ?? -90;
+    const pct = Math.max(2, Math.min(100, Math.round((-25 - sig) / 70 * 100)));
+    const verdict = obj(n.recommendation).verdict || 'connect';
+    const pill = verdict==='connect' ? 'background:#14532d;color:#bbf7d0' : verdict==='caution' ? 'background:#713f12;color:#fde68a' : 'background:#7f1d1d;color:#fecaca';
+    const sel = radarSel===n.ssid ? 'background:#1e293b;' : '';
+    return `<tr data-ssid="${esc(n.ssid)}" class="rlink border-t border-slate-800 hover:bg-slate-800/70 cursor-pointer" style="${sel}">
+     <td class="p-2" data-l="Network"><span style="color:${vColor(verdict)}">●</span> <b class="text-slate-200">${esc(n.ssid)||'<i>hidden</i>'}</b>${n.is_current?' <span class="text-sky-400 text-xs">yours</span>':''}${n.blocked?' <span class="text-red-400 text-xs font-bold">BLOCKED</span>':''}</td>
+     <td class="p-2 text-slate-300" data-l="Security">${esc(n.security||'–')}</td>
+     <td class="p-2 text-slate-400" data-l="Ch">${esc(n.channel||'–')}</td>
+     <td class="p-2" data-l="Signal"><span class="text-slate-300 text-xs">${n.signal_dbm??'–'} dBm</span><div class="w-16 bg-slate-700 rounded h-1 mt-1"><div class="h-1 rounded" style="width:${pct}%;background:${vColor(verdict)}"></div></div></td>
+     <td class="p-2" data-l="Verdict"><span class="px-1.5 py-0.5 rounded text-xs font-bold" style="${pill}">${esc(verdict.toUpperCase())}</span></td>
+     <td class="p-2 text-right mono text-slate-200" data-l="Score">${n.score}</td></tr>`;}).join('')
+    || '<tr><td colspan="6" class="p-3 text-slate-500">No networks match the filter.</td></tr>';
+  document.querySelectorAll('.rlink').forEach(b=>b.onclick=()=>{ radarSel=b.dataset.ssid; document.querySelectorAll('.rlink').forEach(x=>x.style.background = x.dataset.ssid===radarSel ? '#1e293b' : ''); renderRadarSel(); });
+  renderRadarSel();
+  const pb = document.getElementById('policyBanner');
+  const pend = arr(r.pending_blocks);
+  const blocked = arr(obj(r.policy).blocked);
+  if(pb){
     pb.innerHTML = pend.map(a=>`<div class="flex flex-wrap items-center gap-2">⚠️ <b>${esc(a.ssid)}</b> (risk ${a.score}/100) — block it?
       <button data-block="${esc(a.ssid)}" class="bg-red-600 hover:bg-red-500 text-white px-2 py-1 rounded font-bold">Block</button>
       <button data-unblock="${esc(a.ssid)}" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded font-bold">Allow</button></div>
-      <div class="text-slate-400 ml-5 mb-1">${esc((a.reasons || []).join(' · '))}${a.preferred ? ' · <i>in your preferred list (auto-joins)</i>' : ''}</div>`).join('')
+      <div class="text-slate-400 ml-5 mb-1">${esc(arr(a.reasons).join(' · '))}${a.preferred ? ' · <i>in your preferred list (auto-joins)</i>' : ''}</div>`).join('')
       + (blocked.length ? `<div class="mt-1 text-slate-300">Blocklist (${blocked.length}): ${blocked.map(x=>`${esc(x.ssid)}${x.auto ? ' <i>auto</i>' : ''}`).join(' · ')}</div>` : '');
     pb.className = (pend.length || blocked.length) ? 'text-xs mb-3 p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-slate-200' : 'hidden';
-    renderRogue(r.rogue_warnings || []);
-    renderDiag(r.diagnosis);
-  }catch(e){ document.getElementById('radarMeta').textContent = 'scan failed'; }
+  }
+  renderRogue(arr(r.rogue_warnings));
+  renderDiag(r.diagnosis);
 }
 function renderRogue(warnings){
-  const el = document.getElementById('rogueBanner');
-  if(!warnings.length){ el.className = 'hidden'; el.innerHTML=''; return; }
+  const el = document.getElementById('rogueBanner'); if(!el) return;
+  const list = arr(warnings);
+  if(!list.length){ el.className='hidden'; el.innerHTML=''; return; }
   const sev = s => s==='high'?'background:#7f1d1d;color:#fecaca':s==='medium'?'background:#713f12;color:#fde68a':'background:#334155;color:#cbd5e1';
-  el.innerHTML = '<b class="text-white">Rogue-AP indicators</b>' + warnings.map(w=>
-    `<div class="mb-1 mt-1"><span class="px-1 rounded font-bold text-xs" style="${sev(w.severity)}">${esc(w.severity.toUpperCase())}</span> <b>${esc(w.ssid)}</b> <span class="text-slate-300">— ${esc(w.detail)}</span><div class="text-slate-400 ml-2">${esc(w.recommendation||'')}</div></div>`).join('')
+  el.innerHTML = '<b class="text-white">Rogue-AP indicators</b>' + list.map(w=>
+    `<div class="mb-1 mt-1"><span class="px-1 rounded font-bold text-xs" style="${sev(w.severity)}">${esc(String(w.severity||'low').toUpperCase())}</span> <b>${esc(w.ssid)}</b> <span class="text-slate-300">— ${esc(w.detail)}</span><div class="text-slate-400 ml-2">${esc(w.recommendation||'')}</div></div>`).join('')
     + '<div class="text-slate-500 mt-1">Risk indicators, not proof of an attack — confirm with the network owner.</div>';
   el.className = 'text-xs mb-3 p-3 rounded-lg border border-orange-500/30 bg-orange-500/10';
 }
 function renderDiag(d){
-  const el = document.getElementById('diagPanel');
-  const kpi = document.getElementById('diagKpi');
-  if(!d){ el.className='hidden'; el.innerHTML=''; if(kpi) kpi.textContent='–'; return; }
+  const el = document.getElementById('diagPanel'), kpi = document.getElementById('diagKpi');
+  if(!d){ if(el){el.className='hidden';el.innerHTML='';} if(kpi) kpi.textContent='–'; return; }
   const col = d.verdict==='healthy'?'#22c55e':d.verdict==='network_fault'?'#eab308':d.verdict==='mixed'?'#e879f9':'#ef4444';
-  if(kpi){ kpi.textContent = d.verdict.replace(/_/g,' ').toUpperCase(); kpi.style.color = col; }
-  const ev = [...(d.attack_evidence||[]).map(x=>`<li><b>Attack signal:</b> ${esc(x)}</li>`), ...(d.fault_evidence||[]).map(x=>`<li><b>Fault signal:</b> ${esc(x)}</li>`)].join('') || '<li>No specific evidence.</li>';
-  el.innerHTML = `<div class="flex flex-wrap items-center gap-2 text-sm mb-1"><b class="text-white">Diagnosis:</b> <span class="font-bold" style="color:${col}">${esc(d.verdict.replace(/_/g,' ').toUpperCase())}</span><span class="text-slate-400 text-xs">confidence ${esc(d.confidence)} · attack ${esc(d.attack_score)} / fault ${esc(d.fault_score)}</span></div>
-    <div class="text-sm text-slate-300 mb-1">${esc(d.explanation||'')}</div>
-    <ul class="list-disc ml-5 text-sm text-slate-300 mb-1">${ev}</ul>
-    <div class="text-sm text-slate-200"><b>Recommended:</b> ${esc(d.recommended_action||'')}</div>`;
-  el.className = 'text-sm mb-3 p-3 rounded-lg border border-slate-700 bg-slate-800/60';
+  if(kpi){ kpi.textContent = String(d.verdict||'').replace(/_/g,' ').toUpperCase(); kpi.style.color = col; }
+  const ev = [...arr(d.attack_evidence).map(x=>`<li><b>Attack signal:</b> ${esc(x)}</li>`), ...arr(d.fault_evidence).map(x=>`<li><b>Fault signal:</b> ${esc(x)}</li>`)].join('') || '<li>No specific evidence.</li>';
+  if(el){
+    el.innerHTML = `<div class="flex flex-wrap items-center gap-2 text-sm mb-1"><b class="text-white">Diagnosis:</b> <span class="font-bold" style="color:${col}">${esc(String(d.verdict||'').replace(/_/g,' ').toUpperCase())}</span><span class="text-slate-400 text-xs">confidence ${esc(d.confidence)} · attack ${esc(d.attack_score)} / fault ${esc(d.fault_score)}</span></div>
+      <div class="text-sm text-slate-300 mb-1">${esc(d.explanation||'')}</div>
+      <ul class="list-disc ml-5 text-sm text-slate-300 mb-1">${ev}</ul>
+      <div class="text-sm text-slate-200"><b>Recommended:</b> ${esc(d.recommended_action||'')}</div>`;
+    el.className = 'text-sm mb-3 p-3 rounded-lg border border-slate-700 bg-slate-800/60';
+  }
 }
 function renderRadarSel(){
   const n = radarNets.find(x=>x.ssid===radarSel) || radarNets[0];
-  if(n){ radarSel = n.ssid; document.getElementById('radarDetail').innerHTML = radarDetailHTML(n); }
+  const el = document.getElementById('radarDetail');
+  if(n && el) el.innerHTML = radarDetailHTML(n);
 }
-// block / unblock / flag actions (buttons are rendered dynamically)
+on('netSearch','input', e=>{ netQuery = e.target.value; loadRadar(); });
+on('netFilter','change', e=>{ netFilter = e.target.value; loadRadar(); });
+
+/* ================= devices ================= */
+const OUI = {
+  '00:1B:63':'Apple','08:00:27':'VirtualBox','18:66:DA':'Microsoft','AC:DE:48':'Apple',
+  '3C:22:FB':'Apple','F0:18:98':'Apple','D0:81:7A':'Apple','A4:5E:60':'Apple',
+  '00:1A:11':'Google','3C:5A:B4':'Google','F4:F5:E8':'Google','94:EB:2C':'Google',
+  '00:50:F2':'Microsoft','00:0C:29':'VMware','00:1C:42':'Parallels',
+  '00:24:E4':'Withings','B8:27:EB':'Raspberry Pi','DC:A6:32':'Raspberry Pi',
+  'E4:5F:01':'Raspberry Pi','D8:3A:DD':'Raspberry Pi',
+  '00:1C:C0':'Intel','3C:97:0E':'Intel','8C:16:45':'Lenovo','54:E1:AD':'Lenovo',
+  'F8:16:27':'Samsung','78:1F:DB':'Samsung','00:15:99':'Samsung','AC:84:C6':'Samsung',
+  '00:26:AB':'Samsung','E4:32:C5':'Samsung','FC:03:9F':'Samsung',
+  '00:0C:41':'Ubiquiti','24:A4:3C':'Ubiquiti','78:8A:20':'Ubiquiti','68:D7:9A':'Ubiquiti',
+  '50:C7:BF':'TP-Link','AC:84:C6:':'TP-Link','C0:25:E9':'TP-Link','14:CC:20':'TP-Link',
+  '00:1F:33':'Netgear','A0:40:A0':'Netgear','9C:3D:CF':'Netgear',
+  '00:11:32':'Synology','00:08:9B':'Cisco','00:1B:0D':'Cisco','00:00:0C':'Cisco',
+  '00:1F:3F':'AVM/FRITZ!','3C:37:86':'Netatmo','B8:27:EB:':'Raspberry Pi',
+  'FC:EC:DA':'Ubiquiti','00:15:5D':'Microsoft','00:22:48':'Microsoft',
+  '60:A4:B7':'TP-Link','E8:48:B8':'TP-Link','5C:A6:E6':'TP-Link',
+  '70:2C:1F':'Xiaomi','64:B4:73':'Xiaomi','F8:A4:5F':'Xiaomi','28:6C:07':'Xiaomi',
+  'F0:9F:C2':'Ubiquiti','CC:32:E5':'Xiaomi',
+};
+function vendorOf(mac){
+  const m = String(mac||'').replace(/[^0-9a-fA-F]/g,'').toUpperCase();
+  if(m.length < 12) return '';
+  const p = m.slice(0,2)+':'+m.slice(2,4)+':'+m.slice(4,6);
+  return OUI[p] || '';
+}
+let lanAll = [], devQuery = '';
+async function refreshLan(mode='fast', fresh=0){
+  const meta = document.getElementById('lanMeta');
+  if(meta) meta.textContent = mode==='full' ? 'Scanning subnet… (~10s)' : 'Loading…';
+  let r;
+  try{ r = await api(`/api/real/devices?mode=${mode}&fresh=${fresh}`,{timeout:45000}); }
+  catch(e){ if(meta) meta.textContent = 'Scan failed — backend unreachable.'; return; }
+  lanAll = arr(r.devices);
+  document.getElementById('lanCount').textContent = lanAll.length;
+  const c2 = document.getElementById('lanCount2'); if(c2) c2.textContent = lanAll.length;
+  const badge = document.getElementById('devTabBadge'); if(badge) badge.textContent = lanAll.length;
+  renderLanRows();
+  if(meta) meta.textContent = `${lanAll.length} device(s) · ${r.mode} scan${r.cached?' · cached':` · ${((r.scan_ms||0)/1000).toFixed(1)}s`}${r.gateway?` · true isolation needs a MAC block on your router at ${r.gateway}`:''}`;
+}
+function renderLanRows(){
+  const q = devQuery.toLowerCase();
+  const rows = lanAll.filter(d=> !q || [d.ip,d.mac,d.hostname,vendorOf(d.mac)].join(' ').toLowerCase().includes(q));
+  const el = document.getElementById('lanRows'); if(!el) return;
+  el.innerHTML = rows.map(d=>{
+    const v = vendorOf(d.mac);
+    const role = d.is_self ? '💻 you' : d.is_gateway ? '🌐 router' : (v||'');
+    return `<tr class="border-t border-slate-800"><td class="p-2 mono" data-l="IP">${esc(d.ip)}</td><td class="p-2 mono text-xs" data-l="MAC">${esc(d.mac||'–')}</td>
+     <td class="p-2 text-xs" data-l="Vendor / role">${v?`<b class="text-slate-200">${esc(v)}</b>`:''}${role?` <span class="text-slate-400">${role}</span>`:''}</td>
+     <td class="p-2 text-xs" data-l="Host">${esc(d.hostname||'–')}</td>
+     <td class="p-2 text-xs" data-l="Latency">${d.latency_ms!=null?`${Number(d.latency_ms).toFixed(1)} ms`:''}</td>
+     <td class="p-2 text-xs" data-l="Act">${d.flagged?'🚩 flagged':(!d.is_self&&!d.is_gateway?`<button data-flag="${esc(d.ip)}" data-mac="${esc(d.mac||'')}" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs font-bold">Flag</button>`:'')}</td></tr>`;
+  }).join('') || '<tr><td class="p-2 text-slate-500">No devices match the filter.</td></tr>';
+}
+on('btnScan','click', () => refreshLan('full', 1));
+on('devSearch','input', e=>{ devQuery = e.target.value; renderLanRows(); });
+
+/* ================= IP intelligence ================= */
+const SEV_COLOR = {critical:'#ef4444', high:'#f97316', medium:'#eab308', low:'#38bdf8', info:'#64748b'};
+const SEV_BG = {critical:'#7f1d1d', high:'#7c2d12', medium:'#713f12', low:'#0c4a6e', info:'#334155'};
+const SEV_TEXT = {critical:'#fecaca', high:'#fed7aa', medium:'#fde68a', low:'#bae6fd', info:'#cbd5e1'};
+const PURPOSE_CLASS = {hostile:'#ef4444', interesting:'#f97316', shared:'#38bdf8', benign:'#22c55e', unknown:'#64748b'};
+let ipObserved = [], ipSelected = null, ipSortKey='score', ipSortDir=-1, ipQuery='', ipFilterVal='all', ipWatchSet = new Set();
+
+function purposeChip(p){
+  const cls = obj(p).class || 'unknown';
+  const col = PURPOSE_CLASS[cls] || '#64748b';
+  return `<span class="chip" style="background:${col}22;color:${col};border:1px solid ${col}55">${esc(obj(p).label||'Unclassified')}</span>`;
+}
+function sevChip(sev){
+  const s = SEV_BG[sev] ? sev : 'info';
+  return `<span class="chip" style="background:${SEV_BG[s]};color:${SEV_TEXT[s]}">${esc(String(s).toUpperCase())}</span>`;
+}
+async function refreshIPIntel(){
+  let r;
+  try{ r = await api('/api/ip/observed?limit=200',{timeout:30000}); }
+  catch(e){ const m=document.getElementById('ipObsMeta'); if(m) m.textContent='unreachable'; return; }
+  ipObserved = arr(r.observed);
+  ipWatchSet = new Set(arr(r.watchlist).map(w=>w.ip));
+  const sum = obj(r.summary);
+  const meta = document.getElementById('ipObsMeta');
+  if(meta) meta.textContent = `${r.total||0} address(es) · ${sum.avoid||0} avoid · ${sum.caution||0} caution`;
+  const sums = document.getElementById('ipSummary');
+  if(sums){
+    const cards = [
+      ['External peers', String(r.total||0), '#e2e8f0'],
+      ['Avoid', String(sum.avoid||0), sum.avoid? '#ef4444':'#e2e8f0'],
+      ['Caution', String(sum.caution||0), sum.caution? '#eab308':'#e2e8f0'],
+      ['Open alerts', String(obj(r.alerts).unacked||0), (obj(r.alerts).unacked)? '#f97316':'#e2e8f0'],
+    ];
+    sums.innerHTML = cards.map(([k,v,c])=>`<div class="panel rounded p-2"><div class="text-xs text-slate-400">${k}</div><div class="text-lg font-bold" style="color:${c}">${v}</div></div>`).join('');
+  }
+  const kpi = document.getElementById('ipKpi');
+  if(kpi) kpi.textContent = String(r.total||0);
+  const kpi2 = document.getElementById('ipRiskKpi');
+  if(kpi2){
+    const risky = (sum.avoid||0)+(sum.caution||0);
+    kpi2.textContent = String(risky);
+    kpi2.style.color = (sum.avoid||0) ? '#ef4444' : risky ? '#eab308' : '#e2e8f0';
+  }
+  const badge = document.getElementById('ipTabBadge');
+  if(badge) badge.textContent = obj(r.alerts).unacked ? obj(r.alerts).unacked+' alerts' : (r.total||0);
+  renderIPSources(r.sources);
+  renderIPTable();
+  renderIPAlerts(r.alerts);
+}
+function renderIPSources(s){
+  const el = document.getElementById('ipSources'); if(!el) return;
+  const o = obj(s);
+  const pill = (label, on_, note) => `<span class="chip mr-2" style="background:${on_?'#14532d':'#334155'};color:${on_?'#bbf7d0':'#cbd5e1'}" title="${esc(note||'')}">${on_?'●':'○'} ${esc(label)}</span>`;
+  el.innerHTML = `<div class="mb-1">${pill('Scope + reverse DNS', true)}${pill('Origin ASN (Team Cymru, DNS-only)', true)}${pill('Geolocation', !!(obj(o.geo).enabled===false?false:obj(o.geo).enabled), obj(o.geo).note)}${pill('Local reputation feeds', !!(obj(o.reputation).enabled), obj(o.reputation).note)}</div>
+    <div class="text-slate-500">${esc(obj(o.geo).note||'')} ${esc(o.privacy||'')}</div>`;
+}
+function filteredIPs(){
+  const q = ipQuery.toLowerCase();
+  return ipObserved.filter(r=>{
+    const i = obj(r.intel), pl = obj(r.purpose_label);
+    if(ipFilterVal==='avoid' && r.verdict!=='avoid') return false;
+    if(ipFilterVal==='caution' && r.verdict!=='caution') return false;
+    if(ipFilterVal==='connect' && r.verdict!=='connect') return false;
+    if(ipFilterVal==='hostile' && pl.class!=='hostile') return false;
+    if(ipFilterVal==='interesting' && pl.class!=='interesting') return false;
+    if(ipFilterVal==='shared' && pl.class!=='shared') return false;
+    if(ipFilterVal==='watch' && !ipWatchSet.has(r.ip)) return false;
+    if(q){
+      const hay = [r.ip, r.purpose, pl.label, i.org, i.as_name, i.asn, i.country, i.city].join(' ').toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+function renderIPTable(){
+  const rows = filteredIPs().slice().sort((a,b)=>{
+    const key = ipSortKey;
+    let va, vb;
+    if(key==='score'){ va=a.score; vb=b.score; }
+    else if(key==='purpose'){ va=obj(a.purpose_label).label; vb=obj(b.purpose_label).label; }
+    else if(key==='org'){ va=obj(a.intel).org||obj(a.intel).as_name||''; vb=obj(b.intel).org||obj(b.intel).as_name||''; }
+    else if(key==='last_seen'){ va=a.last_seen||''; vb=b.last_seen||''; }
+    else { va=String(a[key]||''); vb=String(b[key]||''); }
+    if(typeof va==='number' && typeof vb==='number') return (va-vb)*ipSortDir;
+    return String(va).localeCompare(String(vb))*ipSortDir;
+  });
+  const el = document.getElementById('ipRows'); if(!el) return;
+  el.innerHTML = rows.map(r=>{
+    const i = obj(r.intel), rep = obj(i.reputation);
+    const score = num(r.score) ?? 0;
+    const col = score>=65?'#ef4444':score>=35?'#eab308':'#22c55e';
+    const repChip = rep.matched
+      ? `<span class="chip" style="background:#7f1d1d;color:#fecaca">${esc(arr(rep.lists).map(l=>l.name).join(', '))}</span>`
+      : `<span class="text-slate-500 text-xs">${arr(rep.checked).length? 'no match':'no feed'}</span>`;
+    const sel = ipSelected===r.ip ? 'background:#1e293b;' : '';
+    return `<tr data-ip="${esc(r.ip)}" class="iplink border-t border-slate-800 srow" style="${sel}">
+      <td class="p-2 mono text-xs" data-l="Address"><b class="text-slate-200">${esc(r.ip)}</b>${ipWatchSet.has(r.ip)?' <span class="text-sky-400">👁</span>':''}</td>
+      <td class="p-2" data-l="Purpose">${purposeChip(r.purpose_label)}</td>
+      <td class="p-2" data-l="Risk"><span class="mono font-bold" style="color:${col}">${score}</span><div class="w-14 bg-slate-700 rounded h-1 mt-1"><div class="h-1 rounded" style="width:${Math.min(100,score)}%;background:${col}"></div></div></td>
+      <td class="p-2 text-xs text-slate-300" data-l="Organisation">${esc(i.org||i.as_name||'–')}${i.asn?`<div class="text-slate-500 mono">${esc(i.asn)}</div>`:''}</td>
+      <td class="p-2 text-xs text-slate-400" data-l="Location">${esc([i.country?((i.country_source==='geo')?i.country:i.country+' (RIR)'):'',i.city].filter(Boolean).join(' · ')||'–')}</td>
+      <td class="p-2 text-xs" data-l="Reputation">${repChip}</td>
+      <td class="p-2 text-xs mono text-slate-400" data-l="Ports">${esc(arr(r.ports).sort((a,b)=>a-b).join(', ')||'–')}</td>
+      <td class="p-2 text-xs text-slate-300" data-l="Program">${esc(arr(r.actor_names).slice(0,2).join(', ')||r.actor_class||'–')}</td>
+      <td class="p-2 text-xs text-slate-400" data-l="Last seen">${esc((r.last_seen||'').replace('T',' ').slice(0,19)||'–')}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="9" class="p-3 text-slate-500">No addresses match the filter.</td></tr>';
+  document.querySelectorAll('.iplink').forEach(b=>b.onclick=()=>{ ipSelected = b.dataset.ip; renderIPTable(); renderIPDetail(); });
+  const note = document.getElementById('ipObsNote');
+  if(note) note.textContent = 'Addresses, ports, connection state and the local program name only — no payloads. Purpose and reputation are indicators, never proof.';
+}
+function ipFacts(i){
+  i = obj(i);
+  const country = i.country
+    ? (i.country_source === 'geo' ? i.country : `${i.country} (RIR)`)
+    : '';
+  return [
+    ['Scope', i.scope],['Reverse DNS', i.rdns],['Origin ASN', i.asn],['AS name', i.as_name],
+    ['Prefix', i.prefix],['RIR', i.rir],['Country', country],['City', i.city],
+    ['Organisation', i.org],['ISP', i.isp],
+  ];
+}
+function renderIPDetail(){
+  const el = document.getElementById('ipDetail'); if(!el) return;
+  const r = ipObserved.find(x=>x.ip===ipSelected);
+  if(!r){ el.innerHTML = '<span class="text-slate-500">Select an address</span>'; return; }
+  const i = obj(r.intel);
+  const facts = ipFacts(i);
+  const rep = obj(i.reputation);
+  el.innerHTML = `
+    <div class="flex flex-wrap items-center gap-2 mb-1">
+      <b class="text-white mono text-sm">${esc(r.ip)}</b>${purposeChip(r.purpose_label)}
+      <span class="chip" style="background:${(num(r.score)??0)>=65?'#7f1d1d':(num(r.score)??0)>=35?'#713f12':'#14532d'};color:${(num(r.score)??0)>=65?'#fecaca':(num(r.score)??0)>=35?'#fde68a':'#bbf7d0'}">RISK ${num(r.score)??0}/100 · ${esc(String(r.verdict||'').toUpperCase())}</span>
+    </div>
+    <div class="flex flex-wrap gap-2 mb-2">
+      <button data-ipwatch="${esc(r.ip)}" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs font-bold">${ipWatchSet.has(r.ip)?'Unwatch':'Watch this address'}</button>
+      <button data-ipreport="${esc(r.ip)}" class="bg-sky-700 hover:bg-sky-600 px-2 py-1 rounded text-xs font-bold">Generate report</button>
+    </div>
+    <div class="text-xs text-slate-400 mb-1">Why this score</div>
+    <ul class="list-disc ml-4 text-xs text-slate-300 mb-2">${arr(r.reasons).map(x=>`<li>${esc(x)}</li>`).join('')}</ul>
+    <div class="text-xs text-slate-400 mb-1">Purpose evidence</div>
+    <ul class="list-disc ml-4 text-xs text-slate-300 mb-2">${arr(r.purpose_evidence).map(x=>`<li>${esc(x)}</li>`).join('')}</ul>
+    <div class="grid grid-cols-2 gap-1 text-xs text-slate-300 mb-2">
+      ${facts.map(([k,v])=>`<div class="truncate" title="${esc(v||'')}"><span class="text-slate-500">${esc(k)}:</span> ${esc(v||'–')}</div>`).join('')}
+    </div>
+    <div class="text-xs text-slate-400 mb-1">Reputation</div>
+    <div class="text-xs mb-2">${rep.matched ? arr(rep.lists).map(l=>`<span class="chip mr-1" style="background:#7f1d1d;color:#fecaca">${esc(l.name)} (${esc(l.type)})</span>`).join('') : `<span class="text-slate-500">No match in ${arr(rep.checked).length} local list(s).</span>`}</div>
+    <div class="text-xs text-slate-400 mb-1">Observed</div>
+    <div class="text-xs text-slate-300 mb-2">
+      Ports: <span class="mono">${esc(arr(r.ports).sort((a,b)=>a-b).join(', ')||'none')}</span><br>
+      Program: ${esc(arr(r.actor_names).join(', ')||r.actor_class||'not attributed')}<br>
+      First seen: ${esc(r.first_seen||'–')} · Hits: ${esc(r.hits||0)}
+    </div>
+    <div id="ipReportOut"></div>`;
+}
+async function loadIPDetail(ip){
+  ipSelected = ip;
+  renderIPTable();
+  renderIPDetail();
+  const el = document.getElementById('ipDetail'); if(!el) return;
+  el.innerHTML = '<div class="text-slate-500 text-xs">Loading intelligence…</div>';
+  try{
+    const r = await api(`/api/ip/lookup?ip=${encodeURIComponent(ip)}`,{timeout:25000});
+    const i = obj(r);
+    const facts = ipFacts(i);
+    const rep = obj(i.reputation);
+    el.innerHTML = `
+      <div class="flex flex-wrap items-center gap-2 mb-2"><b class="text-white mono text-sm">${esc(ip)}</b>
+        <span class="chip bg-slate-700 text-slate-300">${esc(i.scope||'unknown')}</span></div>
+      <div class="flex flex-wrap gap-2 mb-2">
+        <button data-ipwatch="${esc(ip)}" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs font-bold">${ipWatchSet.has(ip)?'Unwatch':'Watch this address'}</button>
+        <button data-ipreport="${esc(ip)}" class="bg-sky-700 hover:bg-sky-600 px-2 py-1 rounded text-xs font-bold">Generate report</button>
+      </div>
+      <div class="grid grid-cols-2 gap-1 text-xs text-slate-300 mb-2">
+        ${facts.map(([k,v])=>`<div class="truncate" title="${esc(v||'')}"><span class="text-slate-500">${esc(k)}:</span> ${esc(v||'–')}</div>`).join('')}
+      </div>
+      <div class="text-xs mb-2">${rep.matched ? arr(rep.lists).map(l=>`<span class="chip mr-1" style="background:#7f1d1d;color:#fecaca">${esc(l.name)} (${esc(l.type)})</span>`).join('') : '<span class="text-slate-500">No match in the local reputation feeds.</span>'}</div>
+      <div class="text-xs text-slate-400 mb-1">Enrichment sources</div>
+      <div class="text-xs text-slate-300 mb-2">Used: ${esc(arr(i.sources).join(', ')||'none')} · Unavailable: ${esc(arr(i.missing).join(', ')||'none')}</div>
+      <div id="ipReportOut"></div>`;
+  }catch(e){
+    el.innerHTML = `<div class="text-xs text-red-400">Lookup failed: ${esc(e.message||'error')}</div>`;
+  }
+}
+function renderIPAlerts(counts){
+  const el = document.getElementById('ipAlertList'); if(!el) return;
+  const c = obj(counts);
+  const cn = document.getElementById('ipAlertCount');
+  if(cn) cn.textContent = c.unacked ? `${c.unacked} unacknowledged` : '';
+  const banner = document.getElementById('ipAlertBanner');
+  if(banner){
+    if(!c.unacked){ banner.className='hidden'; banner.innerHTML=''; }
+    else {
+      banner.innerHTML = `<div class="flex flex-wrap items-center gap-2"><b class="text-white">${c.unacked} unacknowledged IP alert${c.unacked===1?'':'s'}</b>
+        <button data-gotoip="1" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs font-bold">Open IP Intel</button></div>`;
+      banner.className = 'text-xs mb-3 p-3 rounded-lg border border-orange-500/30 bg-orange-500/10 text-slate-200';
+    }
+  }
+}
+async function refreshIPAlerts(){
+  let r; try{ r = await api('/api/ip/alerts?limit=100'); }catch(e){ return; }
+  const el = document.getElementById('ipAlertList'); if(!el) return;
+  const list = arr(r.alerts);
+  el.innerHTML = list.map(a=>`
+    <div class="bg-slate-800 border border-slate-700 rounded px-2 py-1 ${a.ack?'stale':''}">
+      <div class="flex flex-wrap items-center gap-2">${sevChip(a.severity)} <b class="text-slate-200 mono text-xs">${esc(a.ip)}</b>
+        <span class="text-slate-300 text-xs">${esc(a.title)}</span>
+        ${a.ack?'<span class="chip bg-slate-700 text-slate-400">acknowledged</span>':`<button data-ipack="${esc(a.id)}" class="bg-slate-700 hover:bg-slate-600 px-1.5 py-0.5 rounded text-xs font-bold">Ack</button>`}</div>
+      <div class="text-xs text-slate-400 mt-0.5">${esc(a.evidence)}</div>
+      <div class="text-xs text-sky-300 mt-0.5">→ ${esc(a.action)}</div>
+    </div>`).join('') || '<div class="text-xs text-slate-500">No IP alerts. Normal activity.</div>';
+}
+on('btnAckAll','click', async ()=>{
+  let r; try{ r = await api('/api/ip/alerts?limit=100&unacked=1'); }catch(e){ return; }
+  for(const a of arr(r.alerts)){ try{ await api(`/api/ip/alerts/${a.id}/ack`,{method:'POST'}); }catch(e){} }
+  refreshIPAlerts(); refreshIPIntel();
+});
+on('btnLookup','click', ()=>{ const v = document.getElementById('ipInput').value.trim(); if(v) loadIPDetail(v); });
+on('ipInput','keydown', e=>{ if(e.key==='Enter'){ const v=e.target.value.trim(); if(v) loadIPDetail(v); } });
+on('btnWatch','click', async ()=>{
+  const ip = (document.getElementById('ipInput').value || ipSelected || '').trim();
+  if(!ip) return;
+  if(ipWatchSet.has(ip)){ try{ await api(`/api/ip/watch/${encodeURIComponent(ip)}`,{method:'DELETE'}); }catch(e){} }
+  else { try{ await api('/api/ip/watch',{method:'POST',body:JSON.stringify({ip,note:'watched from dashboard'})}); }catch(e){} }
+  refreshIPIntel();
+});
+on('btnFeeds','click', async ()=>{
+  const b = document.getElementById('btnFeeds'); const old = b.textContent;
+  b.textContent = 'Refreshing…';
+  try{ await api('/api/ip/feeds/refresh',{method:'POST',timeout:90000}); }catch(e){}
+  b.textContent = old;
+  refreshIPIntel();
+});
+on('ipSearch','input', e=>{ ipQuery = e.target.value; renderIPTable(); });
+on('ipFilter','change', e=>{ ipFilterVal = e.target.value; renderIPTable(); });
+document.querySelectorAll('[data-sort]').forEach(th=>th.onclick=()=>{
+  const k = th.dataset.sort;
+  if(ipSortKey===k) ipSortDir *= -1; else { ipSortKey = k; ipSortDir = (k==='score')?-1:1; }
+  renderIPTable();
+});
+
+/* ================= AI ================= */
+const AI_LABELS = {nearby_count:'Nearby networks', open_count:'Open networks', lan_devices:'Devices on LAN', gateway_ms:'Gateway latency (ms)', dns_ms:'DNS latency (ms)', signal_dbm:'Signal (dBm)', packet_loss_pct:'Packet loss (%)', packet_rate_pps:'Packet rate (pps)', tcp_retrans:'TCP retransmissions', tcp_connections:'TCP connections', dest_diversity:'Destination diversity'};
+async function refreshAI(){
+  let d; try{ d = await api('/api/real/ai',{timeout:30000}); }catch(e){ return; }
+  const dot = document.getElementById('aiDot'), st = obj(d.status), a = obj(d.assessment);
+  if(dot){
+    if(st.running_properly){ dot.textContent = `● RUNNING PROPERLY · ${st.engine} · ${st.baseline_samples}-sample baseline`; dot.className='text-xs text-green-400'; }
+    else { dot.textContent = `● LIMITED · ${esc(st.detail||'')}`; dot.className='text-xs text-yellow-400'; }
+  }
+  const v = document.getElementById('aiVerdict');
+  if(v){ v.textContent = a.anomaly ? `⚠️ ANOMALY ${a.score}` : `✅ NORMAL ${a.score}`; v.style.cssText = a.anomaly ? 'background:#7f1d1d;color:#fecaca' : 'background:#14532d;color:#bbf7d0'; }
+  const bar = document.getElementById('aiBar');
+  if(bar){ bar.style.width = `${Math.round((num(a.score)||0)*100)}%`; bar.className = 'h-2 rounded ' + (a.anomaly?'bg-red-500':'bg-green-500'); }
+  const det = document.getElementById('aiDetail');
+  if(det) det.textContent = (a.detail||'') + (arr(a.outside_features).length ? ` · outside normal: ${a.outside_features.join(', ')}` : ' · all signals within normal range');
+  const rows = document.getElementById('aiRows'); if(!rows) return;
+  rows.innerHTML = Object.keys(obj(d.normal_ranges)).map(k=>{
+    const rng = obj(d.normal_ranges)[k], lo = rng[0], hi = rng[1];
+    const val = obj(d.snapshot)[k];
+    const ok = val!=null && val>=lo && val<=hi;
+    const disp = val==null ? 'n/a' : (String(k).endsWith('_ms') ? Number(val).toFixed(0) : val);
+    return `<tr class="border-t border-slate-800"><td class="p-2" data-l="Signal">${esc(AI_LABELS[k]||k)}</td><td class="p-2" data-l="Live"><b class="text-white">${esc(disp)}</b></td>
+      <td class="p-2 text-slate-400" data-l="Normal">${esc(lo)} – ${esc(hi)}</td><td class="p-2" data-l="Status">${ok?'✅ normal':'⚠️ out'}</td></tr>`;
+  }).join('');
+}
+
+/* ================= packet / capture ================= */
+async function refreshPacket(){
+  const dot = document.getElementById('pktDot');
+  let r; try{ r = await api('/api/real/packet',{timeout:30000}); }catch(e){ if(dot){dot.textContent='probe failed';dot.className='text-xs text-red-400';} return; }
+  const l = obj(r.loss), f = obj(r.flow);
+  if(dot){ dot.textContent = l.ok ? `● gateway ${esc(l.target||'')} · ${l.cached?'cached':'fresh'}` : '● probe unavailable'; dot.className = 'text-xs ' + (l.ok ? 'text-green-400' : 'text-yellow-400'); }
+  const kpi = document.getElementById('pktKpi');
+  if(kpi){ kpi.textContent = l.loss_pct!=null ? l.loss_pct + '%' : 'n/a'; kpi.style.color = l.loss_pct!=null && l.loss_pct>=5 ? '#ef4444' : '#e2e8f0'; }
+  const fmt = v => v==null ? 'n/a' : v;
+  const cards = document.getElementById('pktCards');
+  if(cards) cards.innerHTML = [
+    ['Packet loss', l.loss_pct!=null?`<b class="text-white">${esc(l.loss_pct)}%</b> <span class="text-slate-400">(${esc(l.received)}/${esc(l.sent)} replies)</span>`:'n/a'],
+    ['Avg latency', l.avg_ms!=null?`<b class="text-white">${Number(l.avg_ms).toFixed(1)} ms</b>`:'n/a'],
+    ['TCP connections', `<b class="text-white">${fmt(f.tcp_connections)}</b> <span class="text-slate-400">· ${fmt(f.dest_diversity)} destinations</span>`],
+    ['Packet rate', f.packet_rate_pps!=null?`<b class="text-white">${esc(f.packet_rate_pps)} pps</b>`:'<span class="text-slate-500">collecting…</span>'],
+  ].map(([k,val])=>`<div class="panel rounded p-2"><div class="text-xs text-slate-400">${k}</div><div class="text-slate-200">${val}</div></div>`).join('');
+  const meta = document.getElementById('pktMeta');
+  if(meta) meta.textContent = `Flow metadata only (counters and headers, no payloads). Retransmissions: ${f.tcp_retrans ?? 'n/a'} · UDP entries: ${f.udp_entries ?? 'n/a'}${l.age_s!=null?` · probe age ${l.age_s}s`:''}`;
+}
+on('btnProbe','click', async ()=>{
+  const b = document.getElementById('btnProbe'); b.textContent='Probing…';
+  try{ await api('/api/real/packet/probe',{method:'POST',body:JSON.stringify({count:5}),timeout:40000}); }catch(e){}
+  b.textContent='Measure loss'; refreshPacket(); refreshAI();
+});
+async function refreshCapture(){
+  let r; try{ r = await api('/api/real/capture/status',{timeout:15000}); }catch(e){ return; }
+  const st = document.getElementById('capStatus');
+  if(st) st.textContent = r.tcpdump_available
+    ? (r.active ? `Capturing${obj(r.capture).interface?` on ${esc(obj(r.capture).interface)} (${esc(obj(r.capture).elapsed_s)}s elapsed)`:''}…` : `tcpdump ready · ${arr(r.captures).length} file(s) retained · auto-expire ${Math.round((obj(r.bounds).retention_s||0)/60)} min`)
+    : 'tcpdump not installed — install it for captures; loss and flow metrics are unaffected.';
+  const cf = document.getElementById('capFiles'); if(!cf) return;
+  cf.innerHTML = arr(r.captures).map(c=>
+    `<div class="flex flex-wrap items-center gap-2 bg-slate-800 border border-slate-700 rounded px-2 py-1"><span class="mono text-xs text-slate-200">${esc(c.file)}</span><span class="text-xs text-slate-400">${((c.size||0)/1024).toFixed(1)} KB · expires in ${Math.round((c.expires_in_s||0)/60)} min</span><a class="text-sky-400 text-xs font-bold" href="/api/real/capture/download?file=${encodeURIComponent(c.file)}">Download</a></div>`).join('')
+    || '<div class="text-xs text-slate-500">No captures retained.</div>';
+}
+on('btnCapStart','click', async ()=>{
+  const body = {interface: document.getElementById('capIface').value || '',
+    duration_s: Number(document.getElementById('capDur').value || 10),
+    max_packets: Number(document.getElementById('capPkts').value || 500),
+    filter: document.getElementById('capFilter').value || ''};
+  try{
+    const r = await api('/api/real/capture/start',{method:'POST',body:JSON.stringify(body),timeout:30000});
+    if(r.detail && !r.ok) alert(r.detail);
+  }catch(e){ alert('Capture request failed: '+(e.message||'')); }
+  refreshCapture();
+});
+on('btnCapStop','click', async ()=>{ try{ await api('/api/real/capture/stop',{method:'POST'}); }catch(e){} refreshCapture(); });
+
+/* ================= timeline ================= */
+let tlFilter = 'all';
+async function refreshTimeline(){
+  let r; try{ r = await api('/api/real/timeline?limit=80',{timeout:25000}); }catch(e){ return; }
+  let items = arr(r.timeline);
+  if(tlFilter==='open') items = items.filter(t=>t.kind==='ip_alert' && !t.ack);
+  else if(tlFilter!=='all') items = items.filter(t=>t.kind===tlFilter);
+  const el = document.getElementById('timelineList'); if(!el) return;
+  el.innerHTML = items.map(t=>{
+    const sev = t.severity ? sevChip(t.severity) : '';
+    const kindLabel = t.kind==='ip_alert' ? 'IP ALERT' : t.kind==='incident' ? 'INCIDENT' : 'event';
+    const kindColor = t.kind==='ip_alert' ? 'text-orange-400' : t.kind==='incident' ? 'text-red-400' : 'text-sky-400';
+    return `<div class="bg-slate-800 border border-slate-700 rounded px-2 py-1 ${t.kind==='ip_alert'&&t.ack?'stale':''}">
+      <span class="text-xs text-slate-500">${esc((t.ts||'').slice(0,19).replace('T',' '))}</span>
+      <span class="font-bold text-xs ${kindColor}">${kindLabel}</span> ${sev}
+      <b class="text-slate-200">${esc(t.title||'')}</b> <span class="text-slate-400 mono text-xs">${esc(t.device||'')}</span>
+      <div class="text-xs text-slate-400">${esc(t.detail||'')}</div></div>`;
+  }).join('') || '<div class="text-xs text-slate-500">No entries yet.</div>';
+}
+on('tlFilter','change', e=>{ tlFilter = e.target.value; refreshTimeline(); });
+on('btnVerify','click', async ()=>{
+  const w = document.getElementById('verifyWindow').value || 30;
+  const el = document.getElementById('verifyResult'); el.textContent = 'Comparing…';
+  try{
+    const r = await api(`/api/real/verify?window_min=${w}`,{timeout:20000});
+    if(!r.ok){ el.textContent = r.detail || 'Not enough data yet.'; return; }
+    const f = (k,v) => v==null?'n/a':k.includes('signal')?`${v} dBm`:k.includes('loss')?`${v}%`:k.includes('gateway')?`${v} ms`:v;
+    el.innerHTML = `<b class="text-white">Verdict: ${esc(String(r.verdict||'').toUpperCase())}</b> <span class="text-slate-400">(${esc(obj(r.before).samples)} vs ${esc(obj(r.after).samples)} samples, last ${esc(r.window_min)} min · ${esc(r.metrics_improved)}/${esc(r.metrics_compared)} metrics improved)</span>
+      <div class="text-xs text-slate-300 mt-1">Gateway ${f('gateway',obj(r.before).avg_gateway_ms)} → ${f('gateway',obj(r.after).avg_gateway_ms)} · Loss ${f('loss',obj(r.before).avg_loss_pct)} → ${f('loss',obj(r.after).avg_loss_pct)} · Signal ${f('signal',obj(r.before).avg_signal_dbm)} → ${f('signal',obj(r.after).avg_signal_dbm)} · Risk ${f('risk',obj(r.before).avg_risk)} → ${f('risk',obj(r.after).avg_risk)}</div>
+      <div class="text-xs text-slate-500">${esc(r.note||'')}</div>`;
+  }catch(e){ el.textContent = 'Verification failed.'; }
+});
+
+/* ================= global action delegation ================= */
 document.addEventListener('click', async ev=>{
-  const b = ev.target.closest('[data-block],[data-unblock],[data-flag]');
+  const b = ev.target.closest('[data-block],[data-unblock],[data-flag],[data-ipack],[data-ipwatch],[data-ipreport],[data-gotoip]');
   if(!b) return;
+  if(b.dataset.gotoip){ switchTab('ipintel'); return; }
   if(b.dataset.block){
     if(!confirm(`Block "${b.dataset.block}"? This computer will forget it and won't auto-join it again.`)) return;
     b.textContent = 'Blocking…';
-    await api('/api/real/block',{method:'POST',body:JSON.stringify({ssid:b.dataset.block})});
+    try{ await api('/api/real/block',{method:'POST',body:JSON.stringify({ssid:b.dataset.block})}); }catch(e){}
     loadRadar();
   }
   if(b.dataset.unblock){
-    await api('/api/real/unblock',{method:'POST',body:JSON.stringify({ssid:b.dataset.unblock})});
+    try{ await api('/api/real/unblock',{method:'POST',body:JSON.stringify({ssid:b.dataset.unblock})}); }catch(e){}
     loadRadar();
   }
   if(b.dataset.flag){
     b.textContent = 'Flagging…';
-    await api('/api/real/device/flag',{method:'POST',body:JSON.stringify({ip:b.dataset.flag,mac:b.dataset.mac||'',note:'flagged from dashboard'})});
+    try{ await api('/api/real/device/flag',{method:'POST',body:JSON.stringify({ip:b.dataset.flag,mac:b.dataset.mac||'',note:'flagged from dashboard'})}); }catch(e){}
     refreshLan();
   }
+  if(b.dataset.ipack){
+    try{ await api(`/api/ip/alerts/${b.dataset.ipack}/ack`,{method:'POST'}); }catch(e){}
+    refreshIPAlerts(); refreshIPIntel();
+  }
+  if(b.dataset.ipwatch){
+    const ip = b.dataset.ipwatch;
+    if(ipWatchSet.has(ip)){ try{ await api(`/api/ip/watch/${encodeURIComponent(ip)}`,{method:'DELETE'}); }catch(e){} }
+    else { try{ await api('/api/ip/watch',{method:'POST',body:JSON.stringify({ip,note:'watched from dashboard'})}); }catch(e){} }
+    refreshIPIntel();
+    if(ipSelected===ip) renderIPDetail();
+  }
+  if(b.dataset.ipreport){
+    const ip = b.dataset.ipreport;
+    const out = document.getElementById('ipReportOut');
+    if(out) out.innerHTML = '<div class="text-xs text-slate-500">Building report…</div>';
+    try{
+      const r = await api(`/api/ip/report?ip=${encodeURIComponent(ip)}`,{timeout:40000});
+      const txt = r.report || '';
+      if(out) out.innerHTML = `<div class="text-xs text-slate-400 mb-1">Investigation report — <a href="#" id="dlReport" class="text-sky-400 font-bold">download .md</a></div>
+        <pre class="bg-slate-900 border border-slate-700 rounded p-2 text-[11px] text-slate-300 whitespace-pre-wrap max-h-80 overflow-y-auto">${esc(txt)}</pre>`;
+      const dl = document.getElementById('dlReport');
+      if(dl) dl.onclick = ev2=>{
+        ev2.preventDefault();
+        const blob = new Blob([txt],{type:'text/markdown'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = `cybershield-report-${ip.replace(/[^a-zA-Z0-9._-]/g,'_')}.md`;
+        document.body.appendChild(a); a.click(); a.remove();
+      };
+    }catch(e){ if(out) out.innerHTML = `<div class="text-xs text-red-400">Report failed: ${esc(e.message||'')}</div>`; }
+  }
 });
-document.getElementById('radar').addEventListener('click', ev=>{  const cv = ev.currentTarget, rect = cv.getBoundingClientRect();
+on('radar','click', ev=>{  const cv = ev.currentTarget, rect = cv.getBoundingClientRect();
   const mx = ev.clientX-rect.left, my = ev.clientY-rect.top;
   let best=null, bd = ('ontouchstart' in window) ? 34 : 20;
   radarNets.forEach(n=>{ if(n._x==null) return;
@@ -424,115 +1101,10 @@ document.getElementById('radar').addEventListener('click', ev=>{  const cv = ev.
   if(best){ radarSel = best.ssid; renderRadarSel(); }
 });
 
-// ---------- AI ----------
-const AI_LABELS = {nearby_count:'Nearby networks', open_count:'Open networks', lan_devices:'Devices on LAN', gateway_ms:'Gateway latency (ms)', dns_ms:'DNS latency (ms)', signal_dbm:'Signal (dBm)', packet_loss_pct:'Packet loss (%)', packet_rate_pps:'Packet rate (pps)', tcp_retrans:'TCP retransmissions', tcp_connections:'TCP connections', dest_diversity:'Destination diversity'};
-async function refreshAI(){
-  let d;
-  try{ d = await api('/api/real/ai'); }catch(e){ return; }
-  const dot = document.getElementById('aiDot'), st = d.status, a = d.assessment;
-  if(st.running_properly){
-    dot.textContent = `● RUNNING PROPERLY · ${st.engine} · ${st.baseline_samples}-sample baseline`;
-    dot.className = 'text-xs text-green-400';
-  } else {
-    dot.textContent = `● LIMITED · ${esc(st.detail)}`;
-    dot.className = 'text-xs text-yellow-400';
-  }
-  const v = document.getElementById('aiVerdict');
-  v.textContent = a.anomaly ? `⚠️ ANOMALY ${a.score}` : `✅ NORMAL ${a.score}`;
-  v.style.cssText = a.anomaly ? 'background:#7f1d1d;color:#fecaca' : 'background:#14532d;color:#bbf7d0';
-  document.getElementById('aiBar').style.width = `${Math.round(a.score*100)}%`;
-  document.getElementById('aiBar').className = 'h-2 rounded ' + (a.anomaly?'bg-red-500':'bg-green-500');
-  document.getElementById('aiDetail').textContent = a.detail + (a.outside_features?.length ? ` · outside normal: ${a.outside_features.join(', ')}` : ' · all signals within normal range');
-  document.getElementById('aiRows').innerHTML = Object.keys(d.normal_ranges).map(k=>{
-    const [lo,hi] = d.normal_ranges[k], val = d.snapshot[k];
-    const ok = val!=null && val>=lo && val<=hi;
-    const disp = val==null ? 'n/a' : (k.endsWith('_ms') ? Number(val).toFixed(0) : val);
-    return `<tr class="border-t border-slate-800"><td class="p-2" data-l="Signal">${AI_LABELS[k]}</td><td class="p-2" data-l="Live"><b class="text-white">${disp}</b></td>
-      <td class="p-2 text-slate-400" data-l="Normal">${lo} – ${hi}</td><td class="p-2" data-l="Status">${ok?'✅ normal':'⚠️ out'}</td></tr>`;
-  }).join('');
-}
-
-refreshLive(); setInterval(refreshLive, 8000);
-refreshLan();
-loadRadar(); setInterval(loadRadar, 12000); drawRadar();
-refreshAI(); setInterval(refreshAI, 10000);
-refreshPacket(); setInterval(refreshPacket, 30000);
-refreshTimeline(); setInterval(refreshTimeline, 30000);
-refreshCapture();
-
-// ---------- packet / flow telemetry ----------
-async function refreshPacket(){
-  const dot = document.getElementById('pktDot');
-  try{
-    const r = await api('/api/real/packet');
-    const l = r.loss||{}, f = r.flow||{};
-    dot.textContent = l.ok ? `● gateway ${esc(l.target||'')} · ${l.cached?'cached':'fresh'}` : '● probe unavailable';
-    dot.className = 'text-xs ' + (l.ok ? 'text-green-400' : 'text-yellow-400');
-    const kpi = document.getElementById('pktKpi');
-    if(kpi){ kpi.textContent = l.loss_pct!=null ? l.loss_pct + '%' : 'n/a'; kpi.style.color = l.loss_pct!=null && l.loss_pct>=5 ? '#ef4444' : '#e2e8f0'; }
-    const fmt = v => v==null ? 'n/a' : v;
-    document.getElementById('pktCards').innerHTML = [
-      ['Packet loss', l.loss_pct!=null?`<b class="text-white">${l.loss_pct}%</b> <span class="text-slate-400">(${l.received}/${l.sent} replies)</span>`:'n/a'],
-      ['Avg latency', l.avg_ms!=null?`<b class="text-white">${Number(l.avg_ms).toFixed(1)} ms</b>`:'n/a'],
-      ['TCP connections', `<b class="text-white">${fmt(f.tcp_connections)}</b> <span class="text-slate-400">· ${fmt(f.dest_diversity)} destinations</span>`],
-      ['Packet rate', f.packet_rate_pps!=null?`<b class="text-white">${f.packet_rate_pps} pps</b>`:'<span class="text-slate-500">collecting…</span>'],
-    ].map(([k,v])=>`<div class="panel rounded p-2"><div class="text-xs text-slate-400">${k}</div><div class="text-slate-200">${v}</div></div>`).join('');
-    document.getElementById('pktMeta').textContent =
-      `Flow metadata only (counters and headers, no payloads). Retransmissions: ${f.tcp_retrans ?? 'n/a'} · UDP entries: ${f.udp_entries ?? 'n/a'}${l.age_s!=null?` · probe age ${l.age_s}s`:''}`;
-  }catch(e){ dot.textContent = 'probe failed'; }
-}
-document.getElementById('btnProbe').onclick = async ()=>{
-  const b = document.getElementById('btnProbe'); b.textContent='Probing…';
-  try{ await api('/api/real/packet/probe',{method:'POST',body:JSON.stringify({count:5})}); }catch(e){}
-  b.textContent='Measure loss'; refreshPacket(); refreshAI();
-};
-
-// ---------- bounded capture controls ----------
-async function refreshCapture(){
-  try{
-    const r = await api('/api/real/capture/status');
-    const st = document.getElementById('capStatus');
-    st.textContent = r.tcpdump_available
-      ? (r.active ? `Capturing${r.capture?` on ${r.capture.interface} (${r.capture.elapsed_s}s elapsed)`:''}…` : `tcpdump ready · ${r.captures.length} file(s) retained · auto-expire ${Math.round(r.bounds.retention_s/60)} min`)
-      : 'tcpdump not installed — install it for captures; loss and flow metrics are unaffected.';
-    document.getElementById('capFiles').innerHTML = (r.captures||[]).map(c=>
-      `<div class="flex flex-wrap items-center gap-2 bg-slate-800 border border-slate-700 rounded px-2 py-1"><span class="mono text-xs text-slate-200">${esc(c.file)}</span><span class="text-xs text-slate-400">${(c.size/1024).toFixed(1)} KB · expires in ${Math.round(c.expires_in_s/60)} min</span><a class="text-sky-400 text-xs font-bold" href="/api/real/capture/download?file=${encodeURIComponent(c.file)}">Download</a></div>`).join('')
-      || '<div class="text-xs text-slate-500">No captures retained.</div>';
-    if(r.active) setTimeout(refreshCapture, 5000);
-  }catch(e){}
-}
-document.getElementById('btnCapStart').onclick = async ()=>{
-  const body = {interface: document.getElementById('capIface').value || '',
-    duration_s: Number(document.getElementById('capDur').value || 10),
-    max_packets: Number(document.getElementById('capPkts').value || 500),
-    filter: document.getElementById('capFilter').value || ''};
-  const r = await api('/api/real/capture/start',{method:'POST',body:JSON.stringify(body)});
-  if(r.detail && !r.ok) alert(r.detail);
-  refreshCapture();
-};
-document.getElementById('btnCapStop').onclick = async ()=>{ await api('/api/real/capture/stop',{method:'POST'}); refreshCapture(); };
-
-// ---------- incident timeline + verification ----------
-async function refreshTimeline(){
-  try{
-    const r = await api('/api/real/timeline?limit=40');
-    document.getElementById('timelineList').innerHTML = (r.timeline||[]).map(t=>
-      `<div class="bg-slate-800 border border-slate-700 rounded px-2 py-1"><span class="text-xs text-slate-500">${esc((t.ts||'').slice(0,19).replace('T',' '))}</span> <span class="font-bold text-xs ${t.kind==='incident'?'text-red-400':'text-sky-400'}">${t.kind==='incident'?'INCIDENT':'event'}</span> <b class="text-slate-200">${esc(t.title||'')}</b> <span class="text-slate-400">${esc(t.device||'')}</span><div class="text-xs text-slate-400">${esc(t.detail||'')}</div></div>`).join('')
-      || '<div class="text-xs text-slate-500">No events yet.</div>';
-  }catch(e){}
-}
-document.getElementById('btnVerify').onclick = async ()=>{
-  const w = document.getElementById('verifyWindow').value || 30;
-  const el = document.getElementById('verifyResult'); el.textContent = 'Comparing…';
-  try{
-    const r = await api(`/api/real/verify?window_min=${w}`);
-    if(!r.ok){ el.textContent = r.detail || 'Not enough data yet.'; return; }
-    const f = (k,v) => v==null?'n/a':k.includes('signal')?`${v} dBm`:k.includes('loss')?`${v}%`:k.includes('gateway')?`${v} ms`:v;
-    el.innerHTML = `<b class="text-white">Verdict: ${esc(r.verdict.toUpperCase())}</b> <span class="text-slate-400">(${r.before.samples} vs ${r.after.samples} samples, last ${r.window_min} min · ${r.metrics_improved}/${r.metrics_compared} metrics improved)</span>
-      <div class="text-xs text-slate-300 mt-1">Gateway ${f('gateway',r.before.avg_gateway_ms)} → ${f('gateway',r.after.avg_gateway_ms)} · Loss ${f('loss',r.before.avg_loss_pct)} → ${f('loss',r.after.avg_loss_pct)} · Signal ${f('signal',r.before.avg_signal_dbm)} → ${f('signal',r.after.avg_signal_dbm)} · Risk ${f('risk',r.before.avg_risk)} → ${f('risk',r.after.avg_risk)}</div>
-      <div class="text-xs text-slate-500">${esc(r.note||'')}</div>`;
-  }catch(e){ el.textContent = 'Verification failed.'; }
-};
+/* ================= boot ================= */
+drawRadar();
+switchTab('overview');
+refreshHealth();
 </script>
 </body>
 </html>

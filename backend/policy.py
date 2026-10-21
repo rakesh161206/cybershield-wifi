@@ -68,9 +68,15 @@ def score_network(net: dict, ssid_variants: dict, public_hint: bool) -> tuple:
     if public_hint and cls in ("wpa2", "wpa3"):
         score = max(score, 45)
         reasons.append("Public/shared hotspot (+45 floor)")
-    if len(ssid_variants.get(ssid, set())) > 1:
-        score = min(95, score + 15)
-        reasons.append("Possible twin: same name, different settings (+15)")
+    variants = ssid_variants.get(ssid, set())
+    if len(variants) > 1:
+        sec_classes = {_sec_class(s) for _, s in variants}
+        if len(sec_classes) > 1:
+            # Same name, different encryption: classic evil-twin pattern.
+            score = min(95, score + 15)
+            reasons.append("Same name with different security types (+15): possible evil twin")
+        # Same security on several channels is normal (dual-band routers,
+        # mesh nodes, extenders) and scores nothing.
     if (net.get("signal_dbm") or 0) < -78:
         score = min(100, score + 5)
         reasons.append("Very weak signal (+5)")

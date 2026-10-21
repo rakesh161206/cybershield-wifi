@@ -48,6 +48,7 @@ def detect(nearby, current_ssid=""):
         variants.setdefault(n.get("ssid"), set()).add(
             (str(n.get("channel", "")), _sec_class(n.get("security", ""))))
     warned_variant = set()
+    warned_new = set()
     warnings = []
 
     for n in nets:
@@ -59,19 +60,37 @@ def detect(nearby, current_ssid=""):
 
         if len(variants.get(ssid, set())) > 1 and ssid not in warned_variant:
             warned_variant.add(ssid)
-            warnings.append({
-                "type": "possible_twin",
-                "ssid": ssid, "severity": "medium",
-                "detail": (f"'{ssid}' appears with {len(variants[ssid])} different "
-                           "channel/security combinations in this scan."),
-                "evidence": sorted([f"ch {c or '?'} / {s}" for c, s in variants[ssid]]),
-                "recommendation": "Confirm the legitimate AP settings with the owner; "
-                                  "avoid joining until the duplicate is explained.",
-                "note": INDICATOR_NOTE,
-            })
+            sec_classes = {_sec_class(s) for _, s in variants[ssid]}
+            if len(sec_classes) > 1:
+                warnings.append({
+                    "type": "possible_twin",
+                    "ssid": ssid, "severity": "medium",
+                    "security_changed": True,
+                    "detail": (f"'{ssid}' appears with {len(variants[ssid])} different "
+                               "channel/security combinations in this scan."),
+                    "evidence": sorted([f"ch {c or '?'} / {s}" for c, s in variants[ssid]]),
+                    "recommendation": "Confirm the legitimate AP settings with the owner; "
+                                      "avoid joining until the duplicate is explained.",
+                    "note": INDICATOR_NOTE,
+                })
+            else:
+                # Same encryption on several channels: normal dual-band router,
+                # mesh node, or extender behaviour. Recorded for transparency,
+                # not treated as an attack signal.
+                warnings.append({
+                    "type": "multichannel",
+                    "ssid": ssid, "severity": "low",
+                    "security_changed": False,
+                    "detail": (f"'{ssid}' is visible on multiple channels "
+                               "with the same security type (typical dual-band/mesh setup)."),
+                    "evidence": sorted([f"ch {c or '?'}" for c, _ in variants[ssid]]),
+                    "recommendation": "No action needed unless the security type also changes.",
+                    "note": INDICATOR_NOTE,
+                })
         prev = history.get(ssid)
         if prev is None:
-            if not is_cur:
+            if not is_cur and ssid not in warned_new:
+                warned_new.add(ssid)
                 warnings.append({
                     "type": "new_network",
                     "ssid": ssid, "severity": "low",

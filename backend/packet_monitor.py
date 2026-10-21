@@ -200,19 +200,133 @@ def _tcp_table():
 
 def _peer_ip(token: str) -> str:
     """Strip the port from a local/foreign address token (v4, v6, Win/Mac)."""
-    t = (token or "").strip()
-    if not t or t in ("*:*", "*"):
+    ip, _ = _peer_addr(token)
+    return ip
+
+
+def _strip_scope(s: str) -> str:
+    """Drop an IPv6 zone/scope suffix (fe80::1%en0 -> fe80::1)."""
+    return (s or "").split("%")[0]
+
+
+def normalize_ip(s: str) -> str:
+    """Canonicalise an address.
+
+    BSD netstat prints IPv6 in a legacy notation that drops trailing zero
+    groups without using '::' (2404:6800:4007:8). That form is not a valid
+    RFC 5952 address, so it is re-expanded to a canonical string.
+    """
+    s = _strip_scope(s or "").strip().strip("[]")
+    if not s:
         return ""
-    m = re.match(r"^\[(.+)\](?::\d+)?$", t)  # bracketed IPv6, e.g. [::1]:443
+    import ipaddress
+    try:
+        return str(ipaddress.ip_address(s))
+    except Exception:
+        pass
+    if ":" in s and "::" not in s:
+        groups = s.split(":")
+        if 0 < len(groups) < 8:
+            try:
+                return str(ipaddress.ip_address(":".join(groups + ["0"] * (8 - len(groups)))))
+            except Exception:
+                pass
+    return s
+
+
+def _is_ip(s: str) -> bool:
+    import ipaddress
+    try:
+        ipaddress.ip_address(_strip_scope(s))
+        return True
+    except Exception:
+        return False
+
+
+def _peer_addr(token: str):
+    """Split an address token into (canonical ip, port).
+
+    Handles the layouts the supported platforms emit:
+      BSD/macOS  1.2.3.4.443        2606:4700::1.443   fe80::1%en0.49152
+      Windows    1.2.3.4:443        [2606:4700::1]:443
+      ss/linux   1.2.3.4:443        [2606:4700::1]:443
+    A bare address with no port is returned unchanged.
+    """
+    t = (token or "").strip()
+    if not t or t in ("*:*", "*") or "*" in t:
+        return "", None
+    port = None
+    m = re.match(r"^\[(.+)\](?::(\d+))?$", t)   # bracketed IPv6
     if m:
         t = m.group(1)
+        port = int(m.group(2)) if m.group(2) else None
     else:
-        # port follows the last dot (BSD: 1.2.3.4.443) or colon (1.2.3.4:443, ::1:443)
-        t = re.split(r"[.:](?=\d+$)", t)[0]
-    t = t.strip("[] ")
-    if not t or not t.strip(":") or t == "*":
-        return ""
-    return t
+        # BSD form: <addr>[%scope].<port>
+        md = re.search(r"\.(\d{1,5})$", t)
+        if md:
+            prefix = t[: md.start()]
+            if ":" in prefix or _is_ip(prefix):
+                t, port = prefix, int(md.group(1))
+        else:
+            mc = re.search(r":(\d{1,5})$", t)
+            if mc and _is_ip(t[: mc.start()]):
+                t, port = t[: mc.start()], int(mc.group(1))
+    t = normalize_ip(t)
+    if not t or not t.strip(":"):
+        return "", None
+    return t, port
+
+
+_TCP_STATES = ("ESTABLISHED", "ESTAB", "LISTEN", "SYN_SENT", "SYN_RECV",
+               "CLOSE_WAIT", "TIME_WAIT", "CLOSE", "FIN_WAIT_1", "FIN_WAIT_2",
+               "LAST_ACK", "CLOSING", "NONE")
+
+
+def _state_of(parts):
+    for p in parts:
+        up = p.upper()
+        for st in _TCP_STATES:
+            if up == st:
+                return st
+        if up.startswith("ESTAB"):
+            return "ESTABLISHED"
+    return "OTHER"
+
+
+def _flow_rows(table: str):
+    """Parse netstat/ss output into structured socket rows.
+
+    Yields dicts: {ip, port, state, proto}. Handles the three common
+    layouts:
+      BSD  netstat -an -p tcp : tcp4 0 0 local.50000 remote.443 ESTABLISHED
+      ss   -tan                 : ESTAB 0 0 local:50000 remote:443
+      Win  netstat -an -p TCP   : TCP local:50000 remote:443 ESTABLISHED
+    """
+    rows = []
+    for line in (table or "").splitlines():
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        proto = parts[0].upper()
+        if not proto.startswith("TCP"):
+            continue
+        if len(parts) >= 6 and parts[0].startswith("TCP"):
+            # BSD: tcp4  Recv-Q Send-Q local foreign state
+            local, foreign = parts[3], parts[4]
+        elif len(parts) >= 4 and parts[0] == "TCP":
+            # Windows: Proto local foreign state [pid]
+            local, foreign = parts[1], parts[2]
+        elif len(parts) >= 5:
+            # ss: State Recv-Q Send-Q local peer
+            local, foreign = parts[3], parts[4]
+        else:
+            continue
+        ip, port = _peer_addr(foreign)
+        if not ip:
+            continue
+        rows.append({"ip": ip, "port": port, "state": _state_of(parts),
+                     "proto": "tcp", "local": _peer_addr(local)[0]})
+    return rows
 
 
 def _flow_counts():
@@ -220,6 +334,7 @@ def _flow_counts():
     est = 0
     remotes = set()
     udp = 0
+    peers = []
     if table:
         for line in table.splitlines():
             up = line.upper()
@@ -239,7 +354,91 @@ def _flow_counts():
             peer = _peer_ip(foreign)
             if peer:
                 remotes.add(peer)
-    return est, udp, remotes
+        for r in _flow_rows(table):
+            peers.append(r)
+    return est, udp, remotes, peers
+
+
+# ---------------- local process attribution ----------------
+# Which process on THIS host owns the connection. Best-effort: lsof on
+# macOS/Linux, netstat+tasklist on Windows. Names only, no arguments.
+
+_BROWSER = ("chrome", "firefox", "safari", "msedge", "edge", "brave", "opera",
+            "vivaldi", "chromium", "arc", "waterfox")
+_UPDATER = ("softwareupdated", "updater", "update", "wuauserv", "backgroundtask",
+            "mdworker", "com.apple", "googleupdate", "teams", "onedrive",
+            "dropbox", "steamservice", "epson", "adobe")
+_MAIL = ("mail", "outlook", "thunderbird", "postfix", "imap", "dovecot")
+_SYSTEM = ("launchd", "kernel_task", "systemd", "system", "svchost", "services",
+           "init", "rsyslogd", "dbus", "cfprefsd", "configd", "mDNSResponder",
+           "wireguard", "tailscaled", "sshd", "ntpd")
+
+
+def _classify_actor(name: str) -> str:
+    n = (name or "").lower()
+    if not n:
+        return "unknown"
+    if "cybershield" in n or "uvicorn" in n:
+        return "cybershield"
+    if any(k in n for k in _BROWSER):
+        return "browser"
+    if any(k in n for k in _UPDATER):
+        return "updater"
+    if any(k in n for k in _MAIL):
+        return "mail"
+    if any(k in n for k in _SYSTEM):
+        return "system"
+    if any(k in n for k in ("python", "node", "java", "docker", "vpn", "openvpn",
+                            "tor", "squid", "privoxy", "proxy")):
+        return "tool"
+    return "application"
+
+
+_actor_cache = {"ts": 0, "map": {}}
+
+
+def _local_actors():
+    """Map remote IP -> [actor names] for open sockets. Cached, never raises."""
+    now = time.time()
+    if now - _actor_cache["ts"] < 20 and _actor_cache["map"]:
+        return _actor_cache["map"]
+    mapping = {}
+    if IS_WIN:
+        out = _run(["netstat", "-ano"], timeout=8)
+        pids = {}
+        tl = _run(["tasklist"], timeout=8)
+        for line in tl.splitlines()[1:]:
+            bits = line.split()
+            if len(bits) >= 2 and bits[1].isdigit():
+                pids[bits[1]] = bits[0]
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) < 4 or parts[0].upper() != "TCP":
+                continue
+            ip, _ = _peer_addr(parts[2])
+            pid = parts[-1]
+            if not ip or not pid.isdigit():
+                continue
+            name = pids.get(pid, "pid-" + pid)
+            mapping.setdefault(ip, []).append(name)
+    else:
+        out = _run(["lsof", "-nP", "-iTCP", "-sTCP:ESTABLISHED"], timeout=8)
+        if not out:
+            out = _run(["lsof", "-nP", "-i"], timeout=8)
+        for line in out.splitlines()[1:]:
+            parts = line.split()
+            if len(parts) < 9:
+                continue
+            cmd = parts[0]
+            node = parts[-1]
+            if "->" not in node:
+                continue
+            ip, _ = _peer_addr(node.split("->")[1].strip())
+            if not ip:
+                continue
+            mapping.setdefault(ip, []).append(cmd)
+    _actor_cache.update({"ts": now, "map": mapping})
+    return mapping
 
 
 def _iface_totals():
@@ -323,14 +522,21 @@ def _tcp_retrans():
     return None
 
 
-def flow_stats(force=False):
-    """Local flow metadata snapshot. Cached for FLOW_TTL. Never raises."""
+def flow_stats(force=False, with_peers=False):
+    """Local flow metadata snapshot. Cached for FLOW_TTL. Never raises.
+
+    with_peers=True additionally returns the observed remote endpoints
+    (ip, port, state) and the local process that owns each connection.
+    Addresses and process names only - never payloads.
+    """
     now = time.time()
     if not force and _flow_cache["payload"] and now - _flow_cache["ts"] < FLOW_TTL:
         p = dict(_flow_cache["payload"])
         p["cached"] = True
-        return p
-    est, udp, remotes = _flow_counts()
+        if not with_peers or "peers" in p:
+            return p
+        # cache was built without peer detail -> fall through and rebuild
+    est, udp, remotes, rows = _flow_counts()
     total, iface = _iface_totals()
     retrans = _tcp_retrans()
     rate = None
@@ -346,6 +552,22 @@ def flow_stats(force=False):
                "packet_rate_pps": rate, "rate_iface": iface,
                "tcp_retrans": retrans, "ok": True,
                "measured_at": now, "cached": False}
+    if with_peers:
+        actors = _local_actors()
+        seen = set()
+        peers = []
+        for r in rows:
+            key = (r["ip"], r["port"], r["state"])
+            if key in seen:
+                continue
+            seen.add(key)
+            names = actors.get(r["ip"]) or []
+            peers.append({**r,
+                          "actors": names,
+                          "actor_class": _classify_actor(names[0]) if names else "unknown"})
+        payload["peers"] = peers
+        payload["actor_note"] = ("Local process names are read from the OS socket table; "
+                                 "no arguments, no payloads.")
     _flow_cache.update({"ts": now, "payload": payload})
     return dict(payload)
 
@@ -366,7 +588,7 @@ def packet_features():
 def measure_all(gateway=None, count=5):
     """Blocking combined probe for the packet endpoint (loss + flow)."""
     loss = measure_loss(host=gateway, count=count, force=True)
-    flow = flow_stats(force=True)
+    flow = flow_stats(force=True, with_peers=True)
     return {"loss": loss, "flow": flow, "measured_at": time.time()}
 
 

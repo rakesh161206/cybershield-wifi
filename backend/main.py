@@ -21,6 +21,11 @@ from backend import policy
 from backend import packet_monitor
 from backend import rogue
 from backend import diagnosis
+from backend import ip_intel
+from backend import ip_purpose
+from backend import ip_alerts
+from backend import ip_report
+from backend import feeds
 from backend.simulator import NORMAL_DEVICES, DECOYS, ALLOW_LIST, DENY_LIST, fresh_device_state
 
 app = FastAPI(title="CyberShield Wi-Fi")
@@ -243,6 +248,156 @@ class CaptureReq(BaseModel):
 
 class ProbeReq(BaseModel):
     count: int = 5
+
+
+class IPReq(BaseModel):
+    ip: str = ""
+    note: str = ""
+
+
+# ---------- IP purpose intelligence ----------
+def _observe_peers(force=False):
+    """Read the local socket table, record what we talked to, and score it.
+
+    Local signals only: addresses, ports, connection state and the name of
+    the local program that owns each socket. No payloads are read.
+    """
+    try:
+        flow = packet_monitor.flow_stats(force=force, with_peers=True)
+    except Exception:
+        return {"peers": [], "intel": {}, "assessed": [], "ok": False}
+    peers = flow.get("peers") or []
+    for p in peers:
+        try:
+            db.observe_ip(p.get("ip"), p.get("port"), p.get("proto", "tcp"),
+                          (p.get("actors") or [None])[0])
+        except Exception:
+            pass
+    ips = sorted({p.get("ip") for p in peers if p.get("ip")})
+    try:
+        intel_map = ip_intel.lookup_many(ips, max_new=20)
+    except Exception:
+        intel_map = {}
+    obs = {o["ip"]: o for o in db.get_ip_observations()}
+    try:
+        assessed = ip_purpose.assess(peers, intel_map, obs)
+    except Exception:
+        assessed = []
+    try:
+        ip_alerts.evaluate(assessed, watchlist=db.get_watchlist())
+    except Exception:
+        pass
+    return {"peers": peers, "intel": intel_map, "assessed": assessed,
+            "flow": flow, "ok": True}
+
+
+@app.get("/api/ip/observed")
+def ip_observed(limit: int = 60, fresh: int = 0, filter: str = ""):
+    """Every external address this host is talking to, with purpose and score."""
+    res = _observe_peers(force=bool(fresh))
+    rows = res["assessed"]
+    if filter:
+        f = filter.lower()
+        rows = [r for r in rows
+                if f in (r.get("ip") or "").lower()
+                or f in (r.get("purpose") or "").lower()
+                or f in (r.get("purpose_label", {}).get("label", "")).lower()
+                or f in (r.get("intel", {}).get("org") or "").lower()
+                or f in (r.get("intel", {}).get("as_name") or "").lower()]
+    try:
+        limit = max(1, min(int(limit), 500))
+    except (TypeError, ValueError):
+        limit = 60
+    counts = {"avoid": 0, "caution": 0, "connect": 0}
+    for r in res["assessed"]:
+        counts[r["verdict"]] = counts.get(r["verdict"], 0) + 1
+    return {"ok": res["ok"], "count": len(rows), "total": len(res["assessed"]),
+            "summary": counts, "observed": rows[:limit],
+            "alerts": ip_alerts.counts(),
+            "sources": ip_intel.sources_status(),
+            "watchlist": db.get_watchlist(),
+            "note": ("Purpose and reputation are indicators derived from local signals. "
+                     "Shared infrastructure (CDN, cloud) is never treated as hostile "
+                     "on its own.")}
+
+
+@app.get("/api/ip/lookup")
+def ip_lookup(ip: str = Query(""), force: int = 0):
+    """Full intelligence payload for one address."""
+    ip = (ip or "").strip()
+    if not ip:
+        return {"error": "ip required"}
+    try:
+        return ip_intel.lookup(ip, force=bool(force))
+    except Exception as e:
+        return {"error": f"lookup failed: {e.__class__.__name__}"}
+
+
+@app.get("/api/ip/alerts")
+def ip_alert_list(limit: int = 100, unacked: int = 0):
+    return {"alerts": ip_alerts.active(limit=limit),
+            "counts": ip_alerts.counts(),
+            "note": ip_alerts.DISCLAIMER}
+
+
+@app.post("/api/ip/alerts/{alert_id}/ack")
+def ip_alert_ack(alert_id: int):
+    ok = db.ack_ip_alert(alert_id)
+    db.log_event("ADMIN", "ip-alert-ack", f"acknowledged IP alert #{alert_id}", 0)
+    return {"ok": ok}
+
+
+@app.post("/api/ip/watch")
+def ip_watch(req: IPReq):
+    if not req.ip:
+        return {"error": "ip required"}
+    db.watch_ip(req.ip, req.note)
+    db.log_event(req.ip, "ip-watch", f"added {req.ip} to the IP watchlist: {req.note}", 0)
+    return {"ok": True, "watchlist": db.get_watchlist()}
+
+
+@app.delete("/api/ip/watch/{ip}")
+def ip_unwatch(ip: str):
+    db.unwatch_ip(ip)
+    db.log_event(ip, "ip-watch", f"removed {ip} from the IP watchlist", 0)
+    return {"ok": True, "watchlist": db.get_watchlist()}
+
+
+@app.get("/api/ip/watchlist")
+def ip_watchlist():
+    return {"watchlist": db.get_watchlist()}
+
+
+@app.get("/api/ip/report")
+def ip_report_endpoint(ip: str = Query(""), format: str = Query("md")):
+    ip = (ip or "").strip()
+    if not ip:
+        return {"error": "ip required"}
+    res = _observe_peers(force=False)
+    intel = res["intel"].get(ip) or ip_intel.lookup(ip)
+    assessed = next((a for a in res["assessed"] if a.get("ip") == ip), None)
+    report = ip_report.build(ip, intel=intel, assessed=assessed)
+    if format == "json":
+        return report
+    return {"ip": ip, "format": "markdown", "report": ip_report.render_markdown(report),
+            "verdict": report["verdict"], "score": report["score"]}
+
+
+@app.get("/api/ip/feeds/status")
+def ip_feeds_status():
+    return feeds.status()
+
+
+@app.post("/api/ip/feeds/refresh")
+def ip_feeds_refresh():
+    res = feeds.refresh()
+    db.log_event("SYSTEM", "ip-feeds", f"reputation feeds refreshed: {res['results']}", 0)
+    return res
+
+
+@app.get("/api/ip/sources")
+def ip_sources():
+    return ip_intel.sources_status()
 
 
 def _live_snapshot():

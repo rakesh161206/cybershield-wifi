@@ -2,3 +2,7 @@ fastapi>=0.115
 uvicorn>=0.30
 scikit-learn>=1.5
 numpy>=1.26
+# Optional but recommended: gives outbound HTTPS a CA bundle to verify
+# reputation feeds against. Some Python builds ship without a resolvable
+# one, which makes feed downloads fail with CERTIFICATE_VERIFY_FAILED.
+certifi>=2024.2.2

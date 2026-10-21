@@ -53,6 +53,28 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, gateway_ms REAL,
         loss_pct REAL, signal_dbm REAL, risk_score INTEGER, verdict TEXT
     )""")
+    # ---- IP purpose intelligence ----
+    c.execute("""CREATE TABLE IF NOT EXISTS ip_observations(
+        ip TEXT PRIMARY KEY, first_seen TEXT, last_seen TEXT, hits INTEGER,
+        ports_json TEXT, protos_json TEXT, actors_json TEXT, samples_json TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS ip_services(
+        ip TEXT, port INTEGER, proto TEXT, first_seen TEXT, last_seen TEXT,
+        hits INTEGER, PRIMARY KEY(ip, port, proto)
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS ip_intel_cache(
+        ip TEXT PRIMARY KEY, ts TEXT, source TEXT, payload_json TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS ip_alerts(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, ip TEXT, type TEXT,
+        severity TEXT, title TEXT, evidence TEXT, action TEXT, ack INTEGER
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS ip_watchlist(
+        ip TEXT PRIMARY KEY, note TEXT, added TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS ip_feeds(
+        name TEXT PRIMARY KEY, url TEXT, last_refresh TEXT, items INTEGER, status TEXT
+    )""")
     c.commit()
     c.close()
 
@@ -360,6 +382,8 @@ def get_timeline(limit: int = 50):
                        (limit,)).fetchall()
         inc = c.execute("SELECT * FROM incidents ORDER BY id DESC LIMIT ?",
                         (limit,)).fetchall()
+        ipa = c.execute("SELECT * FROM ip_alerts ORDER BY id DESC LIMIT ?",
+                        (limit,)).fetchall()
         c.close()
         for r in ev:
             r = dict(r)
@@ -374,7 +398,271 @@ def get_timeline(limit: int = 50):
                           "detail": f"{r.get('reasons', '')} | {r.get('action', '')}",
                           "device": r.get("device_id", ""),
                           "risk_delta": r.get("risk", 0)})
+        for r in ipa:
+            r = dict(r)
+            items.append({"kind": "ip_alert", "ts": r.get("ts"),
+                          "title": r.get("title", "") or r.get("type", ""),
+                          "detail": r.get("evidence", ""),
+                          "device": r.get("ip", ""),
+                          "severity": r.get("severity", "info"),
+                          "alert_type": r.get("type", ""),
+                          "ack": r.get("ack", 0),
+                          "risk_delta": 0})
     except Exception:
         return []
     items.sort(key=lambda x: x.get("ts") or "", reverse=True)
     return items[:limit]
+
+
+# ================= IP purpose intelligence =================
+import json as _json
+
+
+def _loads(raw, default):
+    try:
+        v = _json.loads(raw)
+        return v if v is not None else default
+    except Exception:
+        return default
+
+
+def observe_ip(ip: str, port=None, proto="tcp", actor=None):
+    """Record that this host talked to `ip`. Keeps a small sample of recent
+    observation timestamps (used for interval/beacon analysis)."""
+    ip = (ip or "").strip()
+    if not ip:
+        return
+    try:
+        ts = now_iso()
+        c = conn()
+        cur = c.cursor()
+        row = cur.execute("SELECT hits, ports_json, protos_json, actors_json, "
+                          "samples_json FROM ip_observations WHERE ip=?", (ip,)).fetchone()
+        if row:
+            ports = set(_loads(row["ports_json"], []))
+            protos = set(_loads(row["protos_json"], []))
+            actors = set(_loads(row["actors_json"], []))
+            samples = _loads(row["samples_json"], [])
+            if port:
+                ports.add(int(port))
+            if proto:
+                protos.add(proto)
+            if actor:
+                actors.add(actor)
+            samples.append(ts)
+            samples = samples[-16:]
+            cur.execute("UPDATE ip_observations SET last_seen=?, hits=hits+1, "
+                        "ports_json=?, protos_json=?, actors_json=?, samples_json=? "
+                        "WHERE ip=?",
+                        (ts, _json.dumps(sorted(ports)), _json.dumps(sorted(protos)),
+                         _json.dumps(sorted(actors)), _json.dumps(samples), ip))
+        else:
+            cur.execute("INSERT INTO ip_observations(ip, first_seen, last_seen, hits, "
+                        "ports_json, protos_json, actors_json, samples_json) "
+                        "VALUES(?,?,?,?,?,?,?,?)",
+                        (ip, ts, ts, 1,
+                         _json.dumps([int(port)] if port else []),
+                         _json.dumps([proto] if proto else []),
+                         _json.dumps([actor] if actor else []),
+                         _json.dumps([ts])))
+        if port:
+            srow = cur.execute("SELECT hits FROM ip_services WHERE ip=? AND port=? "
+                               "AND proto=?", (ip, int(port), proto)).fetchone()
+            if srow:
+                cur.execute("UPDATE ip_services SET last_seen=?, hits=hits+1 "
+                            "WHERE ip=? AND port=? AND proto=?",
+                            (ts, ip, int(port), proto))
+            else:
+                cur.execute("INSERT INTO ip_services(ip, port, proto, first_seen, "
+                            "last_seen, hits) VALUES(?,?,?,?,?,1)",
+                            (ip, int(port), proto, ts, ts))
+        c.commit()
+        c.close()
+    except Exception:
+        pass
+
+
+def get_ip_observations():
+    try:
+        c = conn()
+        rows = c.execute("SELECT * FROM ip_observations").fetchall()
+        c.close()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["ports"] = _loads(d.pop("ports_json"), [])
+            d["protos"] = _loads(d.pop("protos_json"), [])
+            d["actors"] = _loads(d.pop("actors_json"), [])
+            d["samples"] = _loads(d.pop("samples_json"), [])
+            out.append(d)
+        return out
+    except Exception:
+        return []
+
+
+def get_ip_services(ip=None):
+    try:
+        c = conn()
+        if ip:
+            rows = c.execute("SELECT * FROM ip_services WHERE ip=? ORDER BY hits DESC",
+                             (ip,)).fetchall()
+        else:
+            rows = c.execute("SELECT * FROM ip_services ORDER BY hits DESC").fetchall()
+        c.close()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def cache_intel(ip: str, payload: dict, source="local"):
+    try:
+        c = conn()
+        c.execute("INSERT INTO ip_intel_cache(ip, ts, source, payload_json) "
+                  "VALUES(?,?,?,?) ON CONFLICT(ip) DO UPDATE SET "
+                  "ts=excluded.ts, source=excluded.source, payload_json=excluded.payload_json",
+                  (ip, now_iso(), source, _json.dumps(payload)))
+        c.commit()
+        c.close()
+    except Exception:
+        pass
+
+
+def get_cached_intel(ip: str, max_age_s=86400):
+    try:
+        c = conn()
+        r = c.execute("SELECT ts, source, payload_json FROM ip_intel_cache WHERE ip=?",
+                      (ip,)).fetchone()
+        c.close()
+        if not r:
+            return None
+        from datetime import datetime
+        age = (datetime.now(timezone.utc) -
+               datetime.fromisoformat(r["ts"])).total_seconds()
+        if age > max_age_s:
+            return None
+        return {**_loads(r["payload_json"], {}), "_cached_at": r["ts"], "_source": r["source"]}
+    except Exception:
+        return None
+
+
+def cached_intel_ips():
+    try:
+        c = conn()
+        rows = c.execute("SELECT ip, ts FROM ip_intel_cache").fetchall()
+        c.close()
+        return {r["ip"]: r["ts"] for r in rows}
+    except Exception:
+        return {}
+
+
+def add_ip_alert(ip, type_, severity, title, evidence, action):
+    """Create an alert unless an identical one exists in the cooldown window."""
+    try:
+        c = conn()
+        c.execute("INSERT INTO ip_alerts(ts, ip, type, severity, title, evidence, "
+                  "action, ack) VALUES(?,?,?,?,?,?,?,0)",
+                  (now_iso(), ip, type_, severity, title, evidence, action))
+        c.commit()
+        c.close()
+        return True
+    except Exception:
+        return False
+
+
+def recent_alert(ip, type_, within_s=900):
+    """Return the id of a recent identical alert, or None."""
+    try:
+        from datetime import datetime
+        c = conn()
+        r = c.execute("SELECT id, ts FROM ip_alerts WHERE ip=? AND type=? "
+                      "ORDER BY id DESC LIMIT 1", (ip, type_)).fetchone()
+        c.close()
+        if not r:
+            return None
+        age = (datetime.now(timezone.utc) -
+               datetime.fromisoformat(r["ts"])).total_seconds()
+        return r["id"] if age <= within_s else None
+    except Exception:
+        return None
+
+
+def get_ip_alerts(limit=100, unacked_only=False):
+    try:
+        c = conn()
+        q = "SELECT * FROM ip_alerts"
+        if unacked_only:
+            q += " WHERE ack=0"
+        q += " ORDER BY id DESC LIMIT ?"
+        rows = c.execute(q, (int(limit),)).fetchall()
+        c.close()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def ack_ip_alert(alert_id):
+    try:
+        c = conn()
+        c.execute("UPDATE ip_alerts SET ack=1 WHERE id=?", (int(alert_id),))
+        c.commit()
+        c.close()
+        return True
+    except Exception:
+        return False
+
+
+def watch_ip(ip, note=""):
+    try:
+        c = conn()
+        c.execute("INSERT INTO ip_watchlist(ip, note, added) VALUES(?,?,?) "
+                  "ON CONFLICT(ip) DO UPDATE SET note=excluded.note", (ip, note, now_iso()))
+        c.commit()
+        c.close()
+        return True
+    except Exception:
+        return False
+
+
+def unwatch_ip(ip):
+    try:
+        c = conn()
+        c.execute("DELETE FROM ip_watchlist WHERE ip=?", (ip,))
+        c.commit()
+        c.close()
+        return True
+    except Exception:
+        return False
+
+
+def get_watchlist():
+    try:
+        c = conn()
+        rows = c.execute("SELECT * FROM ip_watchlist ORDER BY added DESC").fetchall()
+        c.close()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def set_feed_status(name, url, items, status):
+    try:
+        c = conn()
+        c.execute("INSERT INTO ip_feeds(name, url, last_refresh, items, status) "
+                  "VALUES(?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET "
+                  "url=excluded.url, last_refresh=excluded.last_refresh, "
+                  "items=excluded.items, status=excluded.status",
+                  (name, url, now_iso(), int(items), status))
+        c.commit()
+        c.close()
+    except Exception:
+        pass
+
+
+def get_feed_status():
+    try:
+        c = conn()
+        rows = c.execute("SELECT * FROM ip_feeds ORDER BY name").fetchall()
+        c.close()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
