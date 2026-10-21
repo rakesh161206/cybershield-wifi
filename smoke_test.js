@@ -32,11 +32,13 @@ const registry=new Map();
 const IDS=['liveDot','apiDot','clock','liveVerdict','diagKpi','netKpi','ipKpi','ipRiskKpi',
 'lanCount','lanCount2','devTabBadge','netTabBadge','ipTabBadge','pktKpi','liveCards','liveChecks',
 'liveReasons','liveRecs','speedOut','btnSpeed','btnDisconnect','btnScan','btnProbe','btnCapStart',
-'btnCapStop','btnVerify','btnLookup','btnWatch','btnFeeds','btnAckAll','radar','radarMeta','radarList',
+'btnCapStop','btnVerify','btnLookup','btnWatch','btnFeeds','btnAckAll','btnAttack','btnRestore','demoStats','demoRows',
+'decoyRows','demoTimeline','demoTarget','radar','radarMeta','radarList',
 'radarDetail','policyBanner','rogueBanner','diagPanel','ipAlertBanner','ipSources','ipLookupResult',
 'ipObsMeta','ipSummary','ipRows','ipDetail','ipAlertList','ipAlertCount','ipObsNote','ipSearch','ipFilter',
 'ipInput','netSearch','netFilter','devSearch','tlFilter','verifyWindow','healthSpark','healthMeta',
 'aiDot','aiVerdict','aiBar','aiDetail','aiRows','pktDot','pktCards','pktMeta','capStatus','capFiles',
+'verdictHero','heroIcon','heroTitle','heroSub','heroScore','heroBar','heroWhy',
 'capIface','capDur','capPkts','capFilter','lanRows','lanMeta','timelineList','verifyResult',
 'tab-overview','tab-networks','tab-devices','tab-ipintel','tab-intel','tab-timeline'];
 IDS.forEach(id=>{const e=new El('div',id);registry.set(id,e)});
@@ -50,7 +52,7 @@ function httpGet(p){
 global.document={
   getElementById:id=>registry.get(id)||null,
   querySelectorAll:sel=>{
-    if(sel==='[data-tab]')return ['overview','networks','devices','ipintel','intel','timeline'].map(t=>{
+    if(sel==='[data-tab]')return ['overview','networks','devices','demo','ipintel','intel','timeline'].map(t=>{
       const e=new El('button');e.dataset.tab=t;return e;});
     return [];
   },
@@ -79,7 +81,7 @@ eval(js + `
 ;global.__T = { esc, arr, obj, num, refreshLive, refreshHealth, loadRadar, renderIPTable,
   renderIPDetail, renderIPSources, renderIPAlerts, renderRadarSel, renderRogue, renderDiag,
   refreshAI, refreshPacket, refreshTimeline, refreshIPIntel, refreshIPAlerts, refreshLan,
-  sparkline, sevChip, purposeChip, vendorOf, AI_LABELS,
+  sparkline, sevChip, purposeChip, vendorOf, AI_LABELS, refreshDemo, renderHero, verdictState,
   set radarNets(v){ radarNets=v }, get radarNets(){ return radarNets },
   set ipObserved(v){ ipObserved=v }, get ipObserved(){ return ipObserved },
   set ipSelected(v){ ipSelected=v }, get ipSelected(){ return ipSelected },
@@ -138,6 +140,22 @@ function noUndef(html,label){
     const h=document.getElementById('pktCards').innerHTML;
     assert(h.length>50,'packet cards empty');
     noUndef(h,'pktCards');
+  });
+
+  await check('verdict hero renders a plain-language state', async()=>{
+    await T.refreshLive();
+    const t=document.getElementById('heroTitle').textContent;
+    if(!['SAFE','CAREFUL','DANGER','UNKNOWN'].includes(t)) throw new Error('bad verdict state: '+t);
+    if(document.getElementById('heroScore').textContent.indexOf('/100')<0) throw new Error('bad score');
+  });
+
+  await check('refreshDemo renders the simulated fleet', async()=>{
+    await T.refreshDemo();
+    const h=document.getElementById('demoRows').innerHTML;
+    assert(h.length>50,'demo rows empty');
+    noUndef(h,'demoRows');
+    assert(document.getElementById('demoStats').innerHTML.length>10,'demo stats empty');
+    assert(document.getElementById('decoyRows').innerHTML.length>10,'decoy rows empty');
   });
 
   await check('refreshIPIntel renders peers + detail', async()=>{
