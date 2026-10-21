@@ -19,8 +19,16 @@ import re
 import shutil
 import subprocess
 import time
-from real_net import _run
-import database as db
+
+try:
+    from real_net import _run
+except ImportError:  # pragma: no cover - import-style fallback
+    from backend.real_net import _run
+
+try:
+    import database as db
+except ImportError:  # pragma: no cover - import-style fallback
+    from backend import database as db
 
 IS_WIN = platform.system() == "Windows"
 IS_MAC = platform.system() == "Darwin"

@@ -122,8 +122,12 @@ def proximity(dbm) -> dict:
     return {"zone": "edge of range", "detail": f"{dbm} dBm — barely reachable"}
 
 
-import policy
-import database as db
+try:
+    import policy
+    import database as db
+except ImportError:  # pragma: no cover - import-style fallback
+    from backend import policy
+    from backend import database as db
 
 
 def recommend(net: dict, ssid_variants: dict) -> dict:
