@@ -75,6 +75,11 @@ def init_db():
     c.execute("""CREATE TABLE IF NOT EXISTS ip_feeds(
         name TEXT PRIMARY KEY, url TEXT, last_refresh TEXT, items INTEGER, status TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS device_baselines(
+        device_id TEXT PRIMARY KEY, marked_safe INTEGER, established TEXT,
+        base_connections INTEGER, base_destinations INTEGER,
+        base_port_attempts INTEGER, base_request_freq INTEGER, base_traffic INTEGER
+    )""")
     c.commit()
     c.close()
 
@@ -666,3 +671,64 @@ def get_feed_status():
         return [dict(r) for r in rows]
     except Exception:
         return []
+
+
+# ---- per-device behavioural baseline ----
+def set_baseline(device_id: str, profile: dict):
+    """Record a device's own normal behaviour profile."""
+    try:
+        c = conn()
+        c.execute("INSERT INTO device_baselines(device_id, marked_safe, established, "
+                  "base_connections, base_destinations, base_port_attempts, "
+                  "base_request_freq, base_traffic) VALUES(?,?,?,?,?,?,?,?) "
+                  "ON CONFLICT(device_id) DO UPDATE SET marked_safe=1, "
+                  "established=excluded.established, "
+                  "base_connections=excluded.base_connections, "
+                  "base_destinations=excluded.base_destinations, "
+                  "base_port_attempts=excluded.base_port_attempts, "
+                  "base_request_freq=excluded.base_request_freq, "
+                  "base_traffic=excluded.base_traffic",
+                  (device_id, 1, now_iso(),
+                   int(profile.get("connections", 0)), int(profile.get("destinations", 0)),
+                   int(profile.get("port_attempts", 0)), int(profile.get("request_freq", 0)),
+                   int(profile.get("traffic", 0))))
+        c.commit()
+        c.close()
+        return True
+    except Exception:
+        return False
+
+
+def clear_baseline(device_id: str):
+    try:
+        c = conn()
+        c.execute("DELETE FROM device_baselines WHERE device_id=?", (device_id,))
+        c.commit()
+        c.close()
+        return True
+    except Exception:
+        return False
+
+
+def get_baselines():
+    try:
+        c = conn()
+        rows = c.execute("SELECT * FROM device_baselines").fetchall()
+        c.close()
+        out = {}
+        for r in rows:
+            d = dict(r)
+            out[d["device_id"]] = {
+                "marked_safe": bool(d.get("marked_safe")),
+                "established": d.get("established", ""),
+                "profile": {
+                    "connections": d.get("base_connections", 0),
+                    "destinations": d.get("base_destinations", 0),
+                    "port_attempts": d.get("base_port_attempts", 0),
+                    "request_freq": d.get("base_request_freq", 0),
+                    "traffic": d.get("base_traffic", 0),
+                },
+            }
+        return out
+    except Exception:
+        return {}
