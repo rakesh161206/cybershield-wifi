@@ -3,15 +3,20 @@ Software-only prototype: simulated Wi-Fi telemetry + Zero-Trust + AI + decoys.
 Same security engine can later connect to real AP/controller logs.
 """
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.risk_engine import calculate_risk, trust_from_risk, AUTO_ISOLATE_THRESHOLD
+try:
+    from security import install_security
+except ImportError:  # pragma: no cover - import-style fallback
+    from backend.security import install_security
+
+from backend.risk_engine import (calculate_risk, trust_from_risk,
+                                 AUTO_ISOLATE_THRESHOLD, baseline_deviation)
 from backend.ai_detector import ai_score
 from backend import ai_detector
 from backend import database as db
@@ -29,7 +34,10 @@ from backend import feeds
 from backend.simulator import NORMAL_DEVICES, DECOYS, ALLOW_LIST, DENY_LIST, fresh_device_state
 
 app = FastAPI(title="CyberShield Wi-Fi")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# Security: restricted CORS, Host allow-list (DNS-rebinding defence) and a
+# session token on every state-changing request. See backend/security.py.
+install_security(app)
 
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 
