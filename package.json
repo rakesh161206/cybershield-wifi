@@ -8,7 +8,7 @@
     "start": "python3 -m uvicorn main:app --host ${CYBERSHIELD_HOST:-127.0.0.1} --port ${PORT:-8000} --app-dir backend",
     "dev": "python3 -m uvicorn main:app --reload --host ${CYBERSHIELD_HOST:-127.0.0.1} --port ${PORT:-8000} --app-dir backend",
     "test": "python3 -m unittest discover -s tests -v",
-    "health": "node -e \"fetch('http://127.0.0.1:'+(process.env.PORT||8000)+'/api/stats').then(r=>r.text().then(t=>console.log(r.status,t))).catch(e=>{console.error('DOWN',e.message);process.exit(1)})\"",
+    "health": "node -e \"fetch('http://127.0.0.1:'+(process.env.PORT||8000)+'/api/health').then(r=>r.text().then(t=>console.log(r.status,t))).catch(e=>{console.error('DOWN',e.message);process.exit(1)})\"",
     "docker": "docker compose up --build"
   },
   "keywords": [

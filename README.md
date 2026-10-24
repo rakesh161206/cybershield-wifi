@@ -1,6 +1,6 @@
 # 🔐 CyberShield Wi-Fi
 
-**A zero-trust Wi-Fi security prototype: a rule-based risk engine with an Isolation Forest anomaly check, plus a live check of your own Wi-Fi.**
+**A local-first, zero-trust Wi-Fi security dashboard: live connection checks, nearby-network risk, LAN device discovery, IP purpose intelligence and opt-in NextDNS activity.**
 
 > A Wi-Fi device is not permanently trusted just because it authenticated.
 
@@ -10,17 +10,16 @@
 
 ## What it does
 
-CyberShield has two modes. Keep them straight.
+CyberShield inspects the network the host is actually connected to, using live host telemetry only.
 
-| | Simulated demo | Live mode |
-|---|---|---|
-| Data | Fake device telemetry + decoy network | Your real Wi-Fi |
-| Needs | Any OS with Python 3.12+ | macOS, Windows or Linux with the platform's Wi-Fi tools |
-| Good for | Demos, viva, presentations | Checking the network you are on |
-| Can change your system? | No | Only when you confirm (block, disconnect) |
-| Where it runs | Anywhere, including Docker | On your own machine, locally |
+| | Live mode |
+|---|---|
+| Data | Your real Wi-Fi |
+| Needs | macOS, Windows or Linux with the platform's Wi-Fi tools |
+| Can change your system? | Only when you confirm (block, disconnect) |
+| Where it runs | On your own machine, locally |
 
-**Live mode is the point of the project.** The simulated mode exists so the risk engine, the incident log and the timeline can be demonstrated without an attacker on your LAN. It is labelled as synthetic in the dashboard, and it never touches your real network.
+**Live mode is the point of the project.** A container cannot inspect the host's Wi-Fi, ARP table or packets, so Docker is only a UI/API preview.
 
 **Four pillars:** Authenticate → Authorize → Detect → Respond
 
@@ -50,14 +49,14 @@ npm install
 npm start          # http://127.0.0.1:8000
 ```
 
-**Docker** — simulated demo mode only:
+**Docker** — container preview:
 
 ```bash
 docker compose up --build
 # open http://127.0.0.1:8000
 ```
 
-> A container has no access to your real Wi-Fi, ARP table or packets, so the Docker image runs the **simulated** mode. Use `./run.sh` on your own machine for live mode.
+> A container has no access to your real Wi-Fi, ARP table or packets. Live host panels will report "unavailable on this host"; use `./run.sh` on your own machine for live checks and collection.
 
 ### Phone view (optional)
 
@@ -89,20 +88,6 @@ Every setting is optional and the defaults are the safe ones. Copy `.env.example
 | `NEXTDNS_POLL_SECONDS` | `60` | Background sync interval when a profile is connected (minimum 15). |
 | `DNS_RETENTION_DAYS` | `30` | How long CyberShield keeps its local DNS event copy. |
 | `NEXTDNS_BASE_URL` | `https://api.nextdns.io` | Override only for testing or a compatible self-hosted endpoint. |
-
----
-
-## 2–3 minute demo
-
-1. Open the dashboard and go to the **Demo mode** tab. All four devices are TRUSTED, trust around 92–95.
-2. Click **Simulate Wi-Fi attack** (target DEVICE-007).
-3. Watch the risk score climb one signal at a time: port scan → traffic spike → unknown destination → auth failures → request anomaly → unauthorised attempts → 🍯 decoy touch.
-4. Risk reaches 100/100, status goes CRITICAL, and the device is quarantined. The timeline shows every scored signal with the evidence that produced it.
-5. Click **Restore** to lift the quarantine, or try a manual **Isolate**.
-
-![Attack demo](docs/attack-demo.gif)
-
-> What "quarantine" means: in the simulated mode the device's row is marked isolated and its access is revoked **in the demo model**. No real traffic is blocked. Isolating a real device needs a MAC block on your router — see [Limitations](#limitations).
 
 ---
 
@@ -144,55 +129,23 @@ Every setting is optional and the defaults are the safe ones. Copy `.env.example
         ┌───────────────────────────────┴───────────────────────────────┐
         ▼                                                               ▼
   FastAPI (main.py) + security.py                         SQLite (database.py)
-  restricted CORS · Host allow-list · session token       devices · events · incidents
+  restricted CORS · Host allow-list · session token       events · incidents · DNS
         │                                                     health · IP intel
         ▼
   Single-page dashboard (frontend/index.html)
 ```
 
-**Two separate scoring paths, and they do not overlap:**
+**Separate scoring paths, and they do not overlap:**
 
 - **Network risk** — deterministic rules over what a network advertises (security class, twin indicators, signal). No model involved.
-- **Device behaviour risk** — deterministic rules over stored counters, with an Isolation Forest as *corroboration only*. The rules stay authoritative.
-- **IP purpose risk** — deterministic rules over purpose, local actor and behaviour. Again, no model in the decision path.
+- **IP purpose risk** — deterministic rules over purpose, local actor and behaviour.
+- **Live-environment anomaly** — an Isolation Forest corroborates the live snapshot; it never overrides a rule.
 
-The Isolation Forest never overrides a rule. It is reported next to the rule result so a human can see when they agree and when they do not.
-
----
-
-## How the risk engine works
-
-Rules decide first. AI only supports them.
-
-| Signal | Points |
-|---|---|
-| Auth failures > 5 | +20 |
-| Unknown destination | +20 |
-| Port scan | +30 |
-| Traffic spike | +15 |
-| Request anomaly | +15 |
-| Decoy hit | +40 (per hit) |
-| Unauthorized access | +20 |
-| Deviation from this device's own baseline | +15 |
-
-Total is capped at 100.
-
-| Score | Level |
-|---|---|
-| 0–30 | Trusted |
-| 31–60 | Suspicious |
-| 61–80 | High |
-| 81–100 | Critical (auto-quarantine in simulated mode) |
-
-**The AI part:** an Isolation Forest looks at connections, unique destinations, port attempts, request frequency and traffic volume. If scikit-learn is missing, the app falls back to rules only. A decoy hit always counts, even if the model misses it. The word "AI" in this project refers only to these models — the reports and summaries are rule-generated and are not described as AI-generated.
-
-### Per-device baselines
-
-**Mark safe** records a device's current behaviour as its own baseline. From then on the device is judged against its own history, not only against global thresholds: a busy device that suddenly starts scanning is more interesting than a quiet device that never does anything. Drift is measured in multiples of the recorded profile, so a busy device is not punished for being busy.
+The Isolation Forest is reported next to the rule result so a human can see when they agree and when they do not.
 
 ---
 
-## Live mode: ask first, never silent
+## Ask first, never silent
 
 Every radar scan lists networks scoring 65 or higher as **avoid**, with Block and Allow buttons. Nothing is forgotten or blocked until you confirm. Every warning is an indicator, not proof.
 
@@ -274,7 +227,7 @@ A laptop connected to a phone hotspot is just another client. The hotspot forwar
    NEXTDNS_PROFILE_ID=your-profile-id
    ```
 
-   For safety, the setup form accepts credentials only from the machine running CyberShield (loopback). From another device on the same network, set the environment variables on the host instead. The same applies in the Docker demo, where requests arrive through Docker's bridge rather than loopback.
+   For safety, the setup form accepts credentials only from the machine running CyberShield (loopback). From another device on the same network, set the environment variables on the host instead. The same applies in the Docker preview, where requests arrive through Docker's bridge rather than loopback.
 
 3. On each consenting device, set Private DNS / DNS-over-TLS to:
 
@@ -316,16 +269,9 @@ DNS logging shows **lookups**, not page views. Cached answers produce no new eve
 
 All `POST`, `PUT`, `PATCH` and `DELETE` requests need the header `X-CyberShield-Token`. The dashboard fetches it from `GET /api/session` automatically.
 
-**Simulated demo**
-
-- `GET /api/devices` · `/api/stats` · `/api/events` · `/api/incidents` · `/api/decoys`
-- `POST /api/simulate/attack` with `{"device_id": "DEVICE-007"}` — optional `"step": N` applies only the first N stages
-- `POST /api/simulate/normal`
-- `POST /api/device/{id}/allow` · `/isolate` · `/mark-safe` · `/unmark-safe`
-- `GET /api/decoy/{decoy_id}?device_id=DEVICE-007` — touching a decoy logs a high-confidence signal
-
 **Live**
 
+- `GET /api/health` — lightweight liveness probe
 - `GET /api/real/status` — SSID, security, signal, IP/gateway/DNS, protocol checks, risk 0–100, verdict
 - `GET /api/real/networks` — nearby networks with signal and security
 - `GET /api/real/devices?mode=fast|full` — LAN devices via ARP (fast) or ping sweep (full)
@@ -412,8 +358,8 @@ All `POST`, `PUT`, `PATCH` and `DELETE` requests need the header `X-CyberShield-
 backend/          FastAPI app, risk engine, live Wi-Fi checks, IP intelligence, DNS activity
 frontend/         Single-page dashboard (Tailwind via CDN, no build step)
 tests/            unittest suite for the risk, scoring, IP, DNS and security layers
-tools/            Screenshot and GIF capture helpers (Swift + Python)
-docs/             Screenshots and the attack demo GIF
+tools/            Screenshot and image helpers (Swift + Python)
+docs/             Screenshots
 run.sh            Start script (macOS, Linux)
 run.bat           Start script (Windows)
 ```
@@ -442,7 +388,7 @@ Tests also run in CI on every push, across Linux, macOS and Windows.
 - [x] Consented network-wide DNS activity via NextDNS (device mapping, indicators, local retention, purge/pause)
 - [x] Device vendor lookup from the MAC address
 - [x] Export reports as Markdown, JSON or CSV
-- [x] Docker setup for the simulated demo mode
+- [x] Docker container preview
 - [ ] LAN device history over time
 - [ ] Optional pluggable LLM summariser for reports (off by default, user-supplied endpoint)
 

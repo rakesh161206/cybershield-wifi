@@ -67,12 +67,22 @@ class TestSecurityMiddleware(unittest.TestCase):
         cls.token = security.SESSION_TOKEN
 
     def test_get_on_allowed_host_is_served(self):
-        r = self.client.get("/api/stats", headers={"Host": "127.0.0.1"})
+        r = self.client.get("/api/health", headers={"Host": "127.0.0.1"})
         self.assertEqual(r.status_code, 200)
 
     def test_get_on_foreign_host_is_blocked(self):
-        r = self.client.get("/api/stats", headers={"Host": "evil.example.com"})
+        r = self.client.get("/api/health", headers={"Host": "evil.example.com"})
         self.assertEqual(r.status_code, 403)
+
+    def test_demo_routes_are_removed(self):
+        for path in ("/api/stats", "/api/devices", "/api/decoys",
+                     "/api/events", "/api/incidents", "/api/simulate/normal",
+                     "/api/simulate/attack", "/api/decoy/FAKE-ADMIN",
+                     "/api/device/DEVICE-007/allow",
+                     "/api/device/DEVICE-007/isolate",
+                     "/api/device/DEVICE-007/mark-safe"):
+            r = self.client.get(path, headers={"Host": "127.0.0.1"})
+            self.assertEqual(r.status_code, 404, path)
 
     def test_session_endpoint_returns_the_token(self):
         r = self.client.get("/api/session", headers={"Host": "127.0.0.1"})

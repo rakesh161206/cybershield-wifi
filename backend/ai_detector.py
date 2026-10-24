@@ -72,7 +72,7 @@ def ai_score(features: Dict) -> Dict:
     }
 
 
-# ---------------- LIVE environment AI (real network, not simulated) ----------------
+# ---------------- live environment AI ----------------
 # Core environment features plus packet/flow telemetry. Packet features are
 # measured best-effort (gateway loss probe, interface counters, socket
 # table) and imputed to the median when the host cannot provide them.

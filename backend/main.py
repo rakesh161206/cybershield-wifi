@@ -1,6 +1,7 @@
 """CyberShield Wi-Fi — FastAPI backend.
-Software-only prototype: simulated Wi-Fi telemetry + Zero-Trust + AI + decoys.
-Same security engine can later connect to real AP/controller logs.
+
+Live, local-first Wi-Fi inspection: host connection, nearby networks, LAN
+devices, IP purpose intelligence and opt-in NextDNS activity.
 """
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
@@ -15,9 +16,6 @@ try:
 except ImportError:  # pragma: no cover - import-style fallback
     from backend.security import install_security
 
-from backend.risk_engine import (calculate_risk, trust_from_risk,
-                                 AUTO_ISOLATE_THRESHOLD, baseline_deviation)
-from backend.ai_detector import ai_score
 from backend import ai_detector
 from backend import database as db
 from backend import real_net
@@ -32,7 +30,6 @@ from backend import ip_alerts
 from backend import ip_report
 from backend import feeds
 from backend import network_intel
-from backend.simulator import NORMAL_DEVICES, DECOYS, ALLOW_LIST, DENY_LIST, fresh_device_state
 
 app = FastAPI(title="CyberShield Wi-Fi")
 
@@ -60,284 +57,15 @@ FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 
 # ---- init ----
 db.init_db()
-if not db.get_devices():
-    for d in NORMAL_DEVICES:
-        db.upsert_device(fresh_device_state(d))
-    db.log_event("SYSTEM", "boot", "CyberShield initialized. 4 devices authenticated. 4 decoys armed.", 0)
-
-# ---- models ----
-class DecoyTouch(BaseModel):
-    device_id: str = "DEVICE-007"
-    decoy_id: str = "FAKE-ADMIN"
-
-# ---- helpers ----
-def _device_features(dev: dict) -> dict:
-    """The behavioural profile of a device, as the AI model sees it."""
-    return {
-        "connections": 30 + dev["port_scan"] * 120 + dev["traffic_spike"] * 80,
-        "destinations": 3 + dev["unknown_dest"] * 12,
-        "port_attempts": 5 + dev["port_scan"] * 40,
-        "request_freq": 30 + dev["request_anomaly"] * 200,
-        "traffic": 120 + dev["traffic_spike"] * 900,
-    }
 
 
-def apply_features_to_device(dev: dict, features: dict, defer_isolate: bool = False):
-    """Merge new signals into stored counters, recompute risk, enforce auto-isolate.
-
-    defer_isolate suppresses the automatic isolation so a scripted sequence
-    can play out in full before the response is taken.
-    """
-    if features.get("auth_failures"):
-        dev["auth_failures"] = max(dev["auth_failures"], int(features["auth_failures"]))
-    if features.get("port_scan"):
-        dev["port_scan"] = 1
-    if features.get("traffic_spike"):
-        dev["traffic_spike"] = 1
-    if features.get("unknown_destinations"):
-        dev["unknown_dest"] = 1
-    if features.get("request_rate_anomaly"):
-        dev["request_anomaly"] = 1
-    if features.get("unauthorized_attempts"):
-        dev["unauthorized"] = int(features["unauthorized_attempts"])
-    if features.get("decoy_interactions"):
-        dev["decoy_hits"] += int(features["decoy_interactions"])
-
-    profile = _device_features(dev)
-    baselines = db.get_baselines()
-    base = baselines.get(dev["id"], {}).get("profile")
-    deviated = baseline_deviation(profile, base or {})
-
-    risk_features = {
-        "auth_failures": dev["auth_failures"],
-        "unknown_destinations": bool(dev["unknown_dest"]),
-        "port_scan": bool(dev["port_scan"]),
-        "traffic_spike": bool(dev["traffic_spike"]),
-        "request_rate_anomaly": bool(dev["request_anomaly"]),
-        "decoy_interactions": dev["decoy_hits"],
-        "unauthorized_attempts": dev["unauthorized"],
-        "baseline_deviation": deviated,
-    }
-    risk, reasons, level = calculate_risk(risk_features)
-
-    # AI corroboration (does not override decoy signal, just logs)
-    ai = ai_score({
-        "connection_count": profile["connections"],
-        "unique_destinations": profile["destinations"],
-        "port_attempts": profile["port_attempts"],
-        "request_freq": profile["request_freq"],
-        "traffic_volume": profile["traffic"],
-    })
-
-    dev["risk"] = risk
-    dev["trust"] = trust_from_risk(risk)
-    prev = dev["status"]
-    dev["status"] = level
-    if risk >= AUTO_ISOLATE_THRESHOLD and not defer_isolate:
-        dev["isolated"] = 1
-        dev["status"] = "critical"
-    db.upsert_device(dev)
-    return risk, reasons, level, ai, prev
-
-def auto_respond_if_needed(dev: dict, reasons: list):
-    """Take the response once the risk is past the isolation threshold."""
-    if dev["risk"] >= AUTO_ISOLATE_THRESHOLD:
-        dev["isolated"] = 1
-        dev["status"] = "critical"
-        action = ("QUARANTINE (simulated mode): marked isolated in the device table "
-                  "and its access revoked in the demo model. No real traffic is "
-                  "blocked — isolating a real device needs a MAC block on your router.")
-        db.upsert_device(dev)
-        db.add_incident(dev["id"], dev["risk"], "; ".join(reasons), action)
-        db.log_event(dev["id"], "isolate", f"🚨 {dev['id']} AUTOMATICALLY ISOLATED (risk {dev['risk']}/100)", dev["risk"])
-        return True
-    return False
-
-# ---- API ----
-@app.get("/api/devices")
-def devices():
-    baselines = db.get_baselines()
-    out = []
-    for d in db.get_devices():
-        b = baselines.get(d["id"], {})
-        out.append({**d, "allowed": ALLOW_LIST.get(d["id"], ["internet", "dns"]),
-                    "denied": DENY_LIST,
-                    "marked_safe": bool(b.get("marked_safe")),
-                    "baseline_established": b.get("established", ""),
-                    "baseline_profile": b.get("profile") or {},
-                    "baseline_deviated": baseline_deviation(_device_features(d),
-                                                             b.get("profile") or {})})
-    return out
-
-
-@app.post("/api/device/{device_id}/mark-safe")
-def mark_safe(device_id: str):
-    """Record this device's current behaviour as its normal baseline.
-
-    From then on the device is judged against its own recorded profile, not
-    only against global thresholds: a busy device that suddenly starts
-    scanning is more interesting than a quiet device that never does
-    anything. Marking safe also clears the current risk counters.
-    """
-    dev = db.get_device(device_id)
-    if not dev:
-        return {"error": "unknown device"}
-    profile = _device_features(dev)
-    db.set_baseline(device_id, profile)
-    dev.update({"risk": 5, "trust": 95, "status": "trusted", "isolated": 0,
-                "auth_failures": 0, "decoy_hits": 0, "port_scan": 0,
-                "traffic_spike": 0, "unknown_dest": 0, "request_anomaly": 0,
-                "unauthorized": 0})
-    db.upsert_device(dev)
-    db.log_event(device_id, "mark-safe",
-                 f"✅ {device_id} marked safe — baseline recorded "
-                 f"({profile['connections']} conn, {profile['destinations']} dest, "
-                 f"{profile['traffic']} traffic)", 0)
-    return {"ok": True, "device": dev, "baseline": profile}
-
-
-@app.post("/api/device/{device_id}/unmark-safe")
-def unmark_safe(device_id: str):
-    db.clear_baseline(device_id)
-    db.log_event(device_id, "unmark-safe", f"{device_id} baseline cleared", 0)
-    return {"ok": True, "baselines": db.get_baselines()}
-
-@app.get("/api/decoys")
-def decoys():
-    return DECOYS
-
-@app.get("/api/incidents")
-def incidents():
-    return db.get_incidents()
-
-@app.get("/api/events")
-def events(limit: int = 120):
-    return db.get_events(limit)
-
-@app.get("/api/stats")
-def stats():
-    devs = db.get_devices()
-    return {
-        "total": len(devs),
-        "trusted": sum(1 for d in devs if d["status"] == "trusted"),
-        "suspicious": sum(1 for d in devs if d["status"] in ("suspicious", "high")),
-        "critical": sum(1 for d in devs if d["status"] == "critical"),
-        "isolated": sum(1 for d in devs if d["isolated"]),
-        "incidents": len(db.get_incidents(1000)),
-    }
-
-@app.post("/api/simulate/normal")
-def simulate_normal():
-    db.clear_dynamic()
-    for d in NORMAL_DEVICES:
-        db.upsert_device(fresh_device_state(d))
-    db.log_event("SYSTEM", "reset", "Returned to normal baseline. All devices trusted.", 0)
+@app.get("/api/health")
+def health():
     return {"ok": True}
 
 
-class AttackReq(BaseModel):
-    device_id: str = "DEVICE-007"
-    step: int | None = None
+# ---- live host network ----
 
-
-# The attack sequence, in the order the timeline shows it. The decoy touch
-# is the final step: it is the strongest single signal, because a device
-# that has no business talking to a fake admin portal has already lost the
-# argument.
-ATTACK_STEPS = [
-    ("port_scan", "port_scan", "port scan against 20 hosts on the LAN"),
-    ("traffic_spike", "traffic_spike", "sudden traffic volume spike"),
-    ("unknown_destinations", "unknown_dest", "connections to unknown external destinations"),
-    ("auth_failures", "auth_failures", "repeated authentication failures"),
-    ("request_rate_anomaly", "request_anomaly", "abnormal request frequency"),
-    ("unauthorized_attempts", "unauthorized", "unauthorized access attempts"),
-]
-LAST_STEP = len(ATTACK_STEPS)   # index of the decoy step
-
-
-@app.post("/api/simulate/attack")
-def simulate_attack(req: AttackReq):
-    """Replay a scripted attack against one simulated device.
-
-    This is demo scaffolding for the simulated mode. It writes synthetic
-    counters into the device table so the rule engine, the incident log and
-    the timeline can be demonstrated without a real attacker on the network.
-    It never touches the real network.
-
-    `step` applies only the first N stages, so the dashboard can show the
-    risk score climbing one signal at a time. Omit it to run the whole
-    sequence at once.
-    """
-    dev = db.get_device(req.device_id)
-    if not dev:
-        return {"error": f"unknown device {req.device_id}"}
-    upto = LAST_STEP if req.step is None else max(0, min(int(req.step), LAST_STEP))
-    steps = []
-    reasons = []
-    for i, (feature, field, label) in enumerate(ATTACK_STEPS):
-        if i > upto:
-            break
-        if feature == "auth_failures":
-            dev["auth_failures"] = max(dev["auth_failures"], 7)
-        else:
-            dev[field] = 1
-        risk, reasons, level, ai, prev = apply_features_to_device(
-            dev, {feature: 7 if feature == "auth_failures" else 1}, defer_isolate=True)
-        db.log_event(req.device_id, feature, f"⚠️  simulated {label}", 0)
-        steps.append({"step": feature, "label": label, "risk": risk, "level": level})
-    if upto >= LAST_STEP:
-        db.log_decoy_hit(req.device_id, "FAKE-ADMIN")
-        db.log_event(req.device_id, "decoy",
-                     f"🍯 {req.device_id} touched the Fake Admin Portal decoy", 40)
-        risk, reasons, level, ai, prev = apply_features_to_device(
-            dev, {"decoy_interactions": 1}, defer_isolate=True)
-        steps.append({"step": "decoy", "label": "decoy touch", "risk": risk, "level": level})
-        # Only now is the response taken.
-        auto_respond_if_needed(dev, reasons)
-    return {"ok": True, "device": db.get_device(req.device_id), "steps": steps,
-            "complete": upto >= LAST_STEP,
-            "note": "Simulated only — no real traffic was generated and nothing on "
-                    "your network was touched."}
-
-@app.post("/api/device/{device_id}/allow")
-def allow(device_id: str):
-    dev = db.get_device(device_id)
-    if not dev:
-        return {"error": "unknown device"}
-    dev.update({"risk": 8, "trust": 92, "status": "trusted", "isolated": 0,
-                "auth_failures": 0, "decoy_hits": 0, "port_scan": 0,
-                "traffic_spike": 0, "unknown_dest": 0, "request_anomaly": 0, "unauthorized": 0})
-    db.upsert_device(dev)
-    db.log_event(device_id, "allow", f"{device_id} restored by admin, quarantine lifted", -80)
-    return {"ok": True, "device": dev}
-
-@app.post("/api/device/{device_id}/isolate")
-def isolate(device_id: str):
-    dev = db.get_device(device_id)
-    if not dev:
-        return {"error": "unknown device"}
-    dev["isolated"] = 1
-    dev["status"] = "critical"
-    dev["risk"] = max(dev["risk"], 85)
-    dev["trust"] = trust_from_risk(dev["risk"])
-    db.upsert_device(dev)
-    db.add_incident(device_id, dev["risk"], "Manual isolation by admin", "MANUAL-ISOLATE")
-    db.log_event(device_id, "isolate", f"{device_id} manually isolated", 0)
-    return {"ok": True, "device": dev}
-
-@app.get("/api/decoy/{decoy_id}")
-def decoy_hit(decoy_id: str, device_id: str = Query("DEVICE-007")):
-    """Simulated decoy service. Any touch = high-confidence signal."""
-    dev = db.get_device(device_id)
-    if dev:
-        db.log_decoy_hit(device_id, decoy_id.upper())
-        db.log_event(device_id, "decoy", f"🍯 {device_id} touched {decoy_id.upper()}", 40)
-        risk, reasons, level, ai, prev = apply_features_to_device(dev, {"decoy_interactions": 1})
-        auto_respond_if_needed(dev, reasons)
-    return {"decoy": decoy_id, "message": "This is a deception asset. Interaction logged.",
-            "device": device_id}
-
-# ---- LIVE host network (real Wi-Fi, not simulated) ----
 @app.get("/api/real/status")
 def real_status():
     st = real_net.full_status()
