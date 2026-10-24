@@ -31,6 +31,7 @@ from backend import ip_purpose
 from backend import ip_alerts
 from backend import ip_report
 from backend import feeds
+from backend import network_intel
 from backend.simulator import NORMAL_DEVICES, DECOYS, ALLOW_LIST, DENY_LIST, fresh_device_state
 
 app = FastAPI(title="CyberShield Wi-Fi")
@@ -38,6 +39,22 @@ app = FastAPI(title="CyberShield Wi-Fi")
 # Security: restricted CORS, Host allow-list (DNS-rebinding defence) and a
 # session token on every state-changing request. See backend/security.py.
 install_security(app)
+
+# Consented network-wide DNS telemetry (NextDNS). Opt-in; credentials can
+# come from the environment or the owner-only local config. See
+# backend/network_intel.py.
+app.include_router(network_intel.router)
+
+
+@app.on_event("startup")
+def _start_dns_sync():
+    network_intel.start_background()
+
+
+@app.on_event("shutdown")
+def _stop_dns_sync():
+    network_intel.stop_background()
+
 
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 

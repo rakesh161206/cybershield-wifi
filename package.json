@@ -1,7 +1,7 @@
 {
   "name": "cybershield-wifi",
   "version": "2.0.0",
-  "description": "Zero-trust Wi-Fi security: a rule-based risk engine with an Isolation Forest anomaly check, live Wi-Fi risk scoring, and local-first IP purpose intelligence.",
+  "description": "Zero-trust Wi-Fi security: a rule-based risk engine with an Isolation Forest anomaly check, live Wi-Fi risk scoring, local-first IP purpose intelligence, and opt-in consented NextDNS activity.",
   "main": "backend/main.py",
   "scripts": {
     "setup": "pip install -r backend/requirements.txt",
@@ -19,7 +19,9 @@
     "network-security",
     "fastapi",
     "threat-detection",
-    "ip-reputation"
+    "ip-reputation",
+    "nextdns",
+    "dns-security"
   ],
   "license": "MIT",
   "repository": {

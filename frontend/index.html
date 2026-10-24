@@ -92,6 +92,7 @@ button{min-height:40px}
     <button data-tab="devices" class="tabbtn whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">Devices <span id="devTabBadge" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-slate-800 text-slate-300"></span></button>
     <button data-tab="demo" class="tabbtn whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">Demo mode</button>
     <button data-tab="ipintel" class="tabbtn whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">IP Intel <span id="ipTabBadge" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-slate-800 text-slate-300"></span></button>
+    <button data-tab="dnsintel" class="tabbtn whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">DNS Activity <span id="dnsTabBadge" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-slate-800 text-slate-300"></span></button>
     <button data-tab="intel" class="tabbtn whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">AI &amp; Telemetry</button>
     <button data-tab="timeline" class="tabbtn whitespace-nowrap px-4 rounded-t border border-transparent border-b-0 text-sm font-bold text-slate-400">Timeline</button>
   </nav>
@@ -297,6 +298,95 @@ button{min-height:40px}
     </div>
   </div>
 
+  <!-- ===== DNS Activity (consented NextDNS telemetry) ===== -->
+  <div id="tab-dnsintel" class="hidden">
+    <section class="card rounded-lg p-4 mb-4 border-sky-500/20">
+      <div class="flex flex-wrap items-start justify-between gap-2">
+        <div class="min-w-0">
+          <h2 class="font-bold text-white">Network intelligence — DNS activity</h2>
+          <p class="text-xs text-slate-400 mt-0.5">Consented DNS telemetry from a NextDNS profile. Domains, not pages — and only for participants who configured the profile.</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <span id="dnsStatus" class="chip bg-slate-700 text-slate-300">checking…</span>
+          <button id="btnDnsRefresh" class="bg-sky-600 hover:bg-sky-500 text-white px-3 py-1 rounded text-xs font-bold">Refresh</button>
+          <button id="btnDnsDisconnect" class="hidden bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 px-3 py-1 rounded text-xs font-bold">Disconnect profile</button>
+          <button id="btnDnsPurge" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 px-3 py-1 rounded text-xs font-bold">Clear local history</button>
+        </div>
+      </div>
+      <div id="dnsSetup" class="hidden mt-3">
+        <div id="dnsSetupHint" class="panel rounded p-3 border border-amber-500/30 bg-amber-500/10 text-xs text-amber-100"></div>
+        <form id="dnsConnectForm" class="hidden mt-3 panel rounded p-3 border border-sky-500/30 bg-sky-500/5">
+          <div class="text-xs text-slate-300"><b class="text-white">Connect a NextDNS profile.</b> The backend tests the credentials before saving them. The key is stored locally with owner-only permissions and is never returned by the API.</div>
+          <div class="flex flex-wrap gap-2 mt-2">
+            <input id="dnsApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="NextDNS API key" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 w-64">
+            <input id="dnsProfileId" autocomplete="off" spellcheck="false" placeholder="Profile ID" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 w-44">
+            <button id="btnDnsConnect" type="submit" class="bg-sky-600 hover:bg-sky-500 text-white px-3 py-1 rounded text-xs font-bold">Connect &amp; test</button>
+          </div>
+          <div id="dnsConnectMsg" class="text-xs text-slate-400 mt-1"></div>
+        </form>
+        <div id="dnsSetupMsg" class="hidden panel rounded p-3 text-xs"></div>
+      </div>
+      <div id="dnsStats" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mt-3"></div>
+      <div id="dnsStatusDetail" class="text-xs text-slate-500 mt-2"></div>
+    </section>
+
+    <div class="grid lg:grid-cols-3 gap-4 mb-4">
+      <section class="card rounded-lg p-4 lg:col-span-2">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <h2 class="font-bold text-white">Domain activity <span id="dnsMeta" class="text-xs font-normal text-slate-400"></span></h2>
+          <div class="flex flex-wrap items-center gap-2">
+            <input id="dnsSearch" placeholder="filter domain / device / ip…" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 w-52">
+            <select id="dnsDevice" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"><option value="">All devices</option></select>
+            <select id="dnsSeverity" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200">
+              <option value="">All indicators</option>
+              <option value="flagged">Suspicious + alert</option>
+              <option value="suspicious">Suspicious</option>
+              <option value="alert">Alert</option>
+              <option value="watch">Watch</option>
+              <option value="normal">Normal</option>
+            </select>
+            <select id="dnsRange" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200">
+              <option value="1">Last 1h</option>
+              <option value="24" selected>Last 24h</option>
+              <option value="168">Last 7d</option>
+              <option value="720">Last 30d</option>
+              <option value="0">All stored</option>
+            </select>
+          </div>
+        </div>
+        <div class="overflow-x-auto max-h-[540px] overflow-y-auto rounded border border-slate-800"><table class="w-full text-sm rtable">
+          <thead class="text-slate-400 text-xs uppercase sticky top-0 bg-slate-900">
+            <tr><th class="text-left p-2">Time</th><th class="text-left p-2">Device</th><th class="text-left p-2">Domain</th><th class="text-left p-2">Protocol</th><th class="text-left p-2">Status</th><th class="text-left p-2">Indicator</th></tr>
+          </thead>
+          <tbody id="dnsRows"></tbody>
+        </table></div>
+        <p id="dnsEmpty" class="text-xs text-slate-500 mt-2"></p>
+      </section>
+
+      <div class="space-y-4">
+        <section class="card rounded-lg p-4">
+          <h2 class="font-bold text-white mb-2">Security monitoring</h2>
+          <div id="dnsSecurity" class="text-sm space-y-2"></div>
+          <p class="text-xs text-slate-500 mt-2">Indicators come from DNS name shape and the profile's blocklist reason. They are signals to investigate, not proof of an attack.</p>
+        </section>
+        <section class="card rounded-lg p-4">
+          <h2 class="font-bold text-white mb-2">Participants</h2>
+          <div id="dnsParticipants" class="text-sm space-y-1 max-h-72 overflow-y-auto"></div>
+        </section>
+        <section class="card rounded-lg p-4">
+          <h2 class="font-bold text-white mb-2">Top domains</h2>
+          <div id="dnsDomains" class="flex flex-wrap gap-1"></div>
+        </section>
+      </div>
+    </div>
+
+    <section class="card rounded-lg p-4 mb-4 text-xs text-slate-400">
+      <b class="text-slate-200">Consent and limits.</b> <span id="dnsNote"></span>
+      <ul id="dnsLimits" class="list-disc ml-5 mt-1"></ul>
+      <p class="mt-1 text-slate-500">To stop monitoring a device, remove the CyberShield NextDNS Private DNS setting on that device. “Clear local history” also pauses ingestion until you press Refresh.</p>
+    </section>
+  </div>
+
   <!-- ===== AI & Telemetry ===== -->
   <div id="tab-intel" class="hidden">
     <section class="card rounded-lg p-4 mb-4">
@@ -394,7 +484,16 @@ const api = async (p, o={}) => {
         await fetchToken();
         return await doFetch(true);
       }
-      if(!r.ok) throw new Error('HTTP '+r.status);
+      if(!r.ok){
+        let msg = 'HTTP '+r.status;
+        try{
+          const err = await r.json();
+          const d = err && (err.detail || err.error);
+          if(typeof d === 'string' && d) msg = d;
+          else if(d) msg = JSON.stringify(d);
+        }catch(e){}
+        throw new Error(msg);
+      }
       const j = await r.json();
       apiFail = 0; setApiDot();
       return j;
@@ -444,7 +543,7 @@ function notify(msg, kind){
 }
 
 /* ================= tabs + polling ================= */
-const TABS = ['overview','networks','devices','demo','ipintel','intel','timeline'];
+const TABS = ['overview','networks','devices','demo','ipintel','dnsintel','intel','timeline'];
 let activeTab = 'overview';
 const SCHEDULE = {
   overview: [['refreshLive',8000],['refreshHealth',20000]],
@@ -452,6 +551,7 @@ const SCHEDULE = {
   devices:  [],
   demo:     [['refreshDemo',4000]],
   ipintel:  [['refreshIPIntel',10000],['refreshIPAlerts',15000]],
+  dnsintel: [['refreshDns',10000]],
   intel:    [['refreshAI',10000],['refreshPacket',30000],['refreshCapture',15000]],
   timeline: [['refreshTimeline',15000]],
 };
@@ -1166,6 +1266,343 @@ document.querySelectorAll('[data-sort]').forEach(th=>th.onclick=()=>{
   const k = th.dataset.sort;
   if(ipSortKey===k) ipSortDir *= -1; else { ipSortKey = k; ipSortDir = (k==='score')?-1:1; }
   renderIPTable();
+});
+
+/* ================= DNS activity (consented NextDNS telemetry) ================= */
+const DNS_SEV = {
+  normal:     {bg:'#14532d', fg:'#bbf7d0', label:'NORMAL'},
+  watch:      {bg:'#713f12', fg:'#fde68a', label:'WATCH'},
+  suspicious: {bg:'#7c2d12', fg:'#fed7aa', label:'SUSPICIOUS'},
+  alert:      {bg:'#7f1d1d', fg:'#fecaca', label:'ALERT'},
+};
+let dnsData = null, dnsDevices = [], dnsQuery = '', dnsDevice = '',
+    dnsSeverity = '', dnsHours = 24, dnsSearchTimer = null;
+
+function dnsSevChip(sev){
+  const s = DNS_SEV[sev] || DNS_SEV.normal;
+  return `<span class="chip" style="background:${s.bg};color:${s.fg}">${esc(s.label)}</span>`;
+}
+function dnsTimeText(ts){
+  if(!ts) return '–';
+  const d = new Date(ts);
+  return isNaN(d.getTime()) ? String(ts).replace('T',' ').slice(0,19) : d.toLocaleString();
+}
+function dnsTime(ts){ return esc(dnsTimeText(ts)); }
+function dnsWindowLabel(h){
+  if(!h) return 'all stored history';
+  if(h % 24 === 0) return `last ${h/24}d`;
+  return `last ${h}h`;
+}
+function dnsSetStatus(label, bg, fg){
+  const el = document.getElementById('dnsStatus'); if(!el) return;
+  el.className = 'chip';
+  el.style.background = bg; el.style.color = fg;
+  el.textContent = label;
+}
+async function refreshDns(){
+  const params = new URLSearchParams();
+  params.set('hours', String(dnsHours));
+  if(dnsDevice) params.set('device', dnsDevice);
+  if(dnsQuery) params.set('q', dnsQuery);
+  if(dnsSeverity) params.set('severity', dnsSeverity);
+  let d;
+  try{
+    d = await api(`/api/network/overview?${params.toString()}`, {timeout:30000});
+  }catch(e){
+    dnsSetStatus('backend unreachable', '#7f1d1d', '#fecaca');
+    const detail = document.getElementById('dnsStatusDetail');
+    if(detail){ detail.className = 'text-xs text-red-300 mt-2'; detail.textContent = e.message || 'Unable to reach the backend.'; }
+    return;
+  }
+  dnsData = d;
+  renderDns(d);
+}
+function renderDns(d){
+  const st = obj(d.stats), status = obj(d.status);
+  const devices = arr(d.devices), events = arr(d.events);
+  dnsDevices = devices;
+  const configured = !!status.configured;
+  const paused = !!status.paused;
+  const failed = configured && status.ok === false && !paused;
+
+  if(!configured) dnsSetStatus('NextDNS not configured', '#713f12', '#fde68a');
+  else if(paused) dnsSetStatus('paused', '#334155', '#cbd5e1');
+  else if(failed) dnsSetStatus('NextDNS error', '#7f1d1d', '#fecaca');
+  else if(status.ok) dnsSetStatus('● NextDNS connected', '#14532d', '#bbf7d0');
+  else dnsSetStatus('configured', '#334155', '#cbd5e1');
+
+  const badge = document.getElementById('dnsTabBadge');
+  if(badge) badge.textContent = num(st.flagged) ? String(st.flagged) : (num(st.total_queries) ? String(st.total_queries) : '');
+
+  const disconnect = document.getElementById('btnDnsDisconnect');
+  if(disconnect) disconnect.classList.toggle('hidden', !(status.config_source==='file' && status.can_configure));
+
+  const detail = document.getElementById('dnsStatusDetail');
+  if(detail){
+    const bits = [];
+    if(status.last_sync) bits.push(`last sync ${dnsTimeText(status.last_sync)}`);
+    if(failed && status.last_error) bits.push(status.last_error);
+    bits.push(`local retention ${status.retention_days || 30}d`);
+    if(status.config_source==='environment') bits.push('credentials from environment');
+    else if(status.config_source==='file') bits.push('credentials stored locally');
+    if(status.background_sync) bits.push(`background sync ${status.background_interval_s || 60}s`);
+    if(paused) bits.push('ingestion paused after local purge — press Refresh to resume');
+    detail.className = failed ? 'text-xs text-red-300 mt-2' : 'text-xs text-slate-500 mt-2';
+    detail.textContent = bits.join(' · ');
+  }
+
+  renderDnsSetup(configured, paused, failed, status);
+  renderDnsStats(st);
+  renderDnsFilters(devices);
+  renderDnsRows(events);
+  renderDnsParticipants(devices);
+  renderDnsDomains(arr(d.domains));
+  renderDnsSecurity(st);
+
+  const meta = document.getElementById('dnsMeta');
+  if(meta) meta.textContent = `${events.length} shown · ${dnsWindowLabel(num(d.window_hours) ?? 24)} · ${num(st.total_queries) || 0} total`;
+  const note = document.getElementById('dnsNote');
+  if(note) note.textContent = d.note || '';
+  const limits = document.getElementById('dnsLimits');
+  if(limits) limits.innerHTML = arr(d.limitations).map(x=>`<li>${esc(x)}</li>`).join('');
+
+  const empty = document.getElementById('dnsEmpty');
+  if(empty){
+    if(!events.length){
+      empty.textContent = !configured
+        ? (num(st.total_queries) ? 'NextDNS is disconnected. Locally stored history remains; reconnect or clear it.' : 'No DNS events yet. Connect a NextDNS profile to begin.')
+        : paused
+          ? 'Local history is paused. Press Refresh to resume fetching.'
+          : failed
+            ? 'NextDNS could not be reached. The table shows any locally stored history.'
+            : (dnsDevice || dnsQuery || dnsSeverity)
+              ? 'No events match these filters in the selected window.'
+              : 'No DNS events in this window. Open a website on a participating device.';
+    } else {
+      empty.textContent = dnsDevice || dnsQuery || dnsSeverity
+        ? 'Filters apply to the table only. Clear them to see all participants.'
+        : '';
+    }
+  }
+}
+function renderDnsSetup(configured, paused, failed, status){
+  const el = document.getElementById('dnsSetup'); if(!el) return;
+  const form = document.getElementById('dnsConnectForm');
+  const hint = document.getElementById('dnsSetupHint');
+  const msg = document.getElementById('dnsSetupMsg');
+  const can = !!status.can_configure;
+  const source = status.config_source || 'none';
+  const env = source === 'environment';
+  const show = !configured || paused || failed;
+  el.className = show ? 'mt-3' : 'hidden';
+  if(!show){
+    if(form) form.classList.add('hidden');
+    if(msg) msg.classList.add('hidden');
+    return;
+  }
+
+  let hintHtml = '';
+  if(!configured){
+    hintHtml = `<b>Connect a consented DNS profile</b>
+      <ol class="list-decimal ml-5 mt-1 space-y-0.5">
+        <li>Create a <b><a href="https://nextdns.io" target="_blank" rel="noopener" class="underline">NextDNS</a></b> profile, enable query logging, and copy its API key and profile ID.</li>
+        <li>Connect from the machine running CyberShield (below), or set <code>NEXTDNS_API_KEY</code> and <code>NEXTDNS_PROFILE_ID</code> in the environment and restart.</li>
+        <li>On each consenting device, set Private DNS (DoT) to <code>&lt;device-name&gt;-&lt;profile-id&gt;.dns.nextdns.io</code> (simple letters, digits and hyphens).</li>
+      </ol>
+      <div class="mt-1">The key is sent once to the local backend. Never put it in a screenshot or commit it.</div>`;
+    if(!can && !env) hintHtml += `<div class="mt-1 text-amber-200">For safety, credentials can only be entered from the machine running CyberShield. Set the environment variables to configure another host.</div>`;
+  } else if(env){
+    hintHtml = `<b>Credentials come from the environment.</b> <code>NEXTDNS_API_KEY</code> and <code>NEXTDNS_PROFILE_ID</code> are set. Update them and restart to change the profile.`;
+  } else {
+    hintHtml = `<b>Stored locally.</b> The API key is in <code>~/.cybershield/nextdns.json</code> with owner-only permissions.`;
+  }
+  if(hint){
+    hint.className = 'panel rounded p-3 border border-amber-500/30 bg-amber-500/10 text-xs text-amber-100';
+    hint.innerHTML = hintHtml;
+  }
+
+  if(form){
+    const allow = can && !env && !paused;
+    form.classList.toggle('hidden', !allow);
+  }
+  if(msg){
+    if(paused){
+      msg.className = 'panel rounded p-3 border border-slate-600 bg-slate-800/60 text-xs text-slate-300';
+      msg.innerHTML = '<b>Ingestion paused.</b> Local history was cleared. Press <b>Refresh</b> to fetch the latest logs again.';
+    } else if(failed && configured){
+      const next = env
+        ? 'Update the environment variables and restart CyberShield.'
+        : can
+          ? 'Replace the credentials below, or press Refresh to retry. Stored history remains visible.'
+          : 'Open the dashboard on the machine running CyberShield to replace the credentials.';
+      msg.className = 'panel rounded p-3 border border-red-500/30 bg-red-500/10 text-xs text-red-100';
+      msg.innerHTML = `<b>NextDNS is configured but the last sync failed.</b>
+        <div class="mt-1">${esc(status.last_error || 'Check the API key, profile ID and network connection.')}</div>
+        <div class="mt-1">${esc(next)}</div>`;
+    } else {
+      msg.className = 'hidden';
+      msg.innerHTML = '';
+    }
+  }
+}
+function renderDnsStats(st){
+  const el = document.getElementById('dnsStats'); if(!el) return;
+  const flagged = num(st.flagged) || 0;
+  const cards = [
+    ['DNS requests', num(st.total_queries) || 0, '#e2e8f0', 'Domain lookups in this window'],
+    ['Unique domains', num(st.unique_domains) || 0, '#e2e8f0', 'Distinct names requested'],
+    ['Devices observed', num(st.devices) || 0, '#e2e8f0', 'Participants with activity'],
+    ['Suspicious events', flagged, flagged ? '#f97316' : '#e2e8f0', 'Name-shape and blocklist indicators'],
+  ];
+  el.innerHTML = cards.map(([k,v,c,title])=>`<div class="panel rounded p-2" title="${esc(title)}">
+    <div class="text-xs text-slate-400">${esc(k)}</div>
+    <div class="text-2xl font-bold" style="color:${c}">${v}</div>
+  </div>`).join('');
+}
+function renderDnsFilters(devices){
+  const sel = document.getElementById('dnsDevice'); if(!sel) return;
+  const known = devices.some(d=>d.device===dnsDevice);
+  sel.innerHTML = '<option value="">All devices</option>' + devices.map(d=>
+    `<option value="${esc(d.device)}"${dnsDevice===d.device?' selected':''}>${esc(d.device)} (${num(d.queries)||0})</option>`
+  ).join('') + (dnsDevice && !known
+    ? `<option value="${esc(dnsDevice)}" selected>${esc(dnsDevice)} (no activity)</option>` : '');
+}
+function renderDnsRows(events){
+  const el = document.getElementById('dnsRows'); if(!el) return;
+  el.innerHTML = events.map(e=>{
+    const inds = arr(e.indicators);
+    const labels = inds.map(i=>typeof i==='string' ? i : ((i && i.label) || '')).filter(Boolean);
+    const first = labels[0] || '';
+    const tip = labels.join(' · ');
+    const sev = DNS_SEV[e.severity] ? e.severity : 'normal';
+    const status = String(e.status || 'unknown');
+    const statusColor = status === 'blocked' ? '#fecaca' : status === 'allowed' ? '#bbf7d0' : '#cbd5e1';
+    const statusBg = status === 'blocked' ? '#7f1d1d' : status === 'allowed' ? '#14532d' : '#334155';
+    return `<tr class="border-t border-slate-800">
+      <td class="p-2 text-xs text-slate-400 whitespace-nowrap" data-l="Time">${dnsTime(e.ts)}</td>
+      <td class="p-2 text-xs" data-l="Device"><b class="text-slate-200">${esc(e.device||'Unidentified device')}</b>
+        <div class="text-[10px] text-slate-500">${esc(e.device_model || e.client_ip || '')}</div></td>
+      <td class="p-2" data-l="Domain"><b class="text-cyan-300">${esc(e.domain)}</b>
+        <div class="text-[10px] text-slate-500">${esc(e.root_domain||'')}</div></td>
+      <td class="p-2 text-xs text-slate-300" data-l="Protocol">${esc(e.protocol||'–')}</td>
+      <td class="p-2 text-xs" data-l="Status"><span class="chip" style="background:${statusBg};color:${statusColor}">${esc(status)}</span></td>
+      <td class="p-2 text-xs" data-l="Indicator">${dnsSevChip(sev)}${first?`<div class="text-[10px] text-slate-500 mt-0.5" title="${esc(tip)}">${esc(first)}</div>`:''}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" class="p-3 text-slate-500">No DNS events to show.</td></tr>';
+}
+function renderDnsParticipants(devices){
+  const el = document.getElementById('dnsParticipants'); if(!el) return;
+  el.innerHTML = devices.map(d=>{
+    const flagged = num(d.flagged) || 0;
+    const ips = arr(d.client_ips).join(', ');
+    const sel = dnsDevice===d.device ? 'background:#1e293b;' : '';
+    return `<button data-dnsdev="${esc(d.device)}" class="w-full text-left bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded px-2 py-1" style="${sel}">
+      <div class="flex flex-wrap items-center gap-1">
+        <b class="text-slate-200 text-xs">${esc(d.device)}</b>
+        ${flagged?`<span class="chip" style="background:#7c2d12;color:#fed7aa">${flagged} flagged</span>`:''}
+      </div>
+      <div class="text-[11px] text-slate-400">${num(d.queries)||0} queries · ${num(d.domains)||0} domains${ips?` · ${esc(ips)}`:''}</div>
+    </button>`;
+  }).join('') || '<div class="text-xs text-slate-500">No participants observed yet.</div>';
+}
+function renderDnsDomains(domains){
+  const el = document.getElementById('dnsDomains'); if(!el) return;
+  el.innerHTML = domains.map(d=>`<button data-dnsdomain="${esc(d.domain)}" class="chip bg-slate-800 hover:bg-slate-700 text-cyan-300" title="Filter by this domain">${esc(d.domain)} <span class="text-slate-400">${num(d.queries)||0}</span></button>`).join('')
+    || '<span class="text-xs text-slate-500">No domains yet.</span>';
+}
+function renderDnsSecurity(st){
+  const el = document.getElementById('dnsSecurity'); if(!el) return;
+  const rows = [
+    ['alert','Alert','Blocklist reason reported by NextDNS'],
+    ['suspicious','Suspicious','Unusual name shape (punycode, raw IP, high entropy)'],
+    ['watch','Watch','Blocked lookup, high-abuse TLD or deep subdomain'],
+    ['normal','Normal','Regular DNS requests'],
+  ];
+  el.innerHTML = rows.map(([key,label,desc])=>{
+    const count = num(st[key==='alert'?'alerts':key]) || 0;
+    return `<div class="flex items-start gap-2">
+      ${dnsSevChip(key)}
+      <div class="min-w-0"><b class="text-slate-200 text-xs">${esc(label)}</b> <span class="mono text-xs text-slate-300">${count}</span>
+        <div class="text-[11px] text-slate-400">${esc(desc)}</div></div>
+    </div>`;
+  }).join('') + `<div class="text-[11px] text-slate-400 border-t border-slate-800 pt-2">${num(st.blocked)||0} lookup(s) blocked by the profile. ${num(st.flagged)||0} flagged in total.</div>`;
+}
+on('btnDnsRefresh','click', async ()=>{
+  const b = document.getElementById('btnDnsRefresh'); if(!b) return;
+  const old = b.textContent; b.disabled = true; b.textContent = 'Refreshing…';
+  try{ await api('/api/network/refresh',{method:'POST',timeout:45000}); }
+  catch(e){ notify('DNS refresh failed: '+(e.message||'unknown error'), 'error'); }
+  b.disabled = false; b.textContent = old;
+  refreshDns();
+});
+on('btnDnsPurge','click', async ()=>{
+  if(!confirm('Clear CyberShield\'s local DNS history and pause ingestion? NextDNS keeps its own logs.')) return;
+  const b = document.getElementById('btnDnsPurge'); if(!b) return;
+  const old = b.textContent; b.disabled = true; b.textContent = 'Clearing…';
+  try{
+    const r = await api('/api/network/history',{method:'DELETE'});
+    notify(`Cleared ${r.removed||0} local DNS event(s). Ingestion paused; press Refresh to resume.`, 'ok');
+  }catch(e){ notify('Clear failed: '+(e.message||'unknown error'), 'error'); }
+  b.disabled = false; b.textContent = old;
+  refreshDns();
+});
+on('dnsConnectForm','submit', async e=>{
+  e.preventDefault();
+  const keyEl = document.getElementById('dnsApiKey');
+  const profileEl = document.getElementById('dnsProfileId');
+  const btn = document.getElementById('btnDnsConnect');
+  const msg = document.getElementById('dnsConnectMsg');
+  const apiKey = keyEl ? keyEl.value.trim() : '';
+  const profileId = profileEl ? profileEl.value.trim() : '';
+  if(!apiKey || !profileId){
+    if(msg){ msg.className = 'text-xs text-red-300 mt-1'; msg.textContent = 'Enter both the API key and the profile ID.'; }
+    return;
+  }
+  if(btn){ btn.disabled = true; btn.textContent = 'Testing…'; }
+  if(msg){ msg.className = 'text-xs text-slate-400 mt-1'; msg.textContent = 'Testing the credentials with NextDNS…'; }
+  try{
+    const r = await api('/api/network/connect', {method:'POST', timeout:45000,
+      body: JSON.stringify({api_key:apiKey, profile_id:profileId})});
+    if(keyEl) keyEl.value = '';
+    if(profileEl) profileEl.value = '';
+    if(msg){ msg.className = 'text-xs text-emerald-300 mt-1'; msg.textContent = `Connected. Fetched ${r.fetched||0} log row(s).`; }
+    notify('NextDNS connected.', 'ok');
+    await refreshDns();
+  }catch(err){
+    if(msg){ msg.className = 'text-xs text-red-300 mt-1'; msg.textContent = err.message || 'Connection failed.'; }
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = 'Connect & test'; }
+  }
+});
+on('btnDnsDisconnect','click', async ()=>{
+  if(!confirm('Remove the locally stored NextDNS credentials? Local history stays until you clear it.')) return;
+  const b = document.getElementById('btnDnsDisconnect'); if(!b) return;
+  const old = b.textContent; b.disabled = true; b.textContent = 'Disconnecting…';
+  try{
+    await api('/api/network/connect', {method:'DELETE'});
+    notify('NextDNS profile disconnected. Local history was kept.', 'ok');
+  }catch(e){ notify('Disconnect failed: '+(e.message||'unknown error'), 'error'); }
+  b.disabled = false; b.textContent = old;
+  refreshDns();
+});
+on('dnsDevice','change', e=>{ dnsDevice = e.target.value; refreshDns(); });
+on('dnsSeverity','change', e=>{ dnsSeverity = e.target.value; refreshDns(); });
+on('dnsRange','change', e=>{ dnsHours = Number(e.target.value) || 0; refreshDns(); });
+on('dnsSearch','input', e=>{
+  clearTimeout(dnsSearchTimer);
+  dnsSearchTimer = setTimeout(()=>{ dnsQuery = e.target.value.trim(); refreshDns(); }, 350);
+});
+on('dnsParticipants','click', e=>{
+  const b = e.target.closest('[data-dnsdev]'); if(!b) return;
+  dnsDevice = b.dataset.dnsdev;
+  const sel = document.getElementById('dnsDevice'); if(sel) sel.value = dnsDevice;
+  refreshDns();
+});
+on('dnsDomains','click', e=>{
+  const b = e.target.closest('[data-dnsdomain]'); if(!b) return;
+  dnsQuery = b.dataset.dnsdomain;
+  const input = document.getElementById('dnsSearch'); if(input) input.value = dnsQuery;
+  refreshDns();
 });
 
 /* ================= AI ================= */

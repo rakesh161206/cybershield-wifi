@@ -7,3 +7,7 @@ venv/
 node_modules/
 .DS_Store
 *.pcap
+
+# locally stored NextDNS credentials (also lives in ~/.cybershield/)
+nextdns.json
+.cybershield/

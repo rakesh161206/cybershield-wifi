@@ -40,7 +40,11 @@ const IDS=['liveDot','apiDot','clock','liveVerdict','diagKpi','netKpi','ipKpi','
 'aiDot','aiVerdict','aiBar','aiDetail','aiRows','pktDot','pktCards','pktMeta','capStatus','capFiles',
 'verdictHero','heroIcon','heroTitle','heroSub','heroScore','heroBar','heroWhy',
 'capIface','capDur','capPkts','capFilter','lanRows','lanMeta','timelineList','verifyResult',
-'tab-overview','tab-networks','tab-devices','tab-ipintel','tab-intel','tab-timeline'];
+'tab-overview','tab-networks','tab-devices','tab-ipintel','tab-dnsintel','tab-intel','tab-timeline',
+'dnsStatus','dnsSetup','dnsSetupHint','dnsConnectForm','dnsApiKey','dnsProfileId','btnDnsConnect',
+'dnsConnectMsg','dnsSetupMsg','dnsStats','dnsStatusDetail','dnsMeta','dnsSearch','dnsDevice',
+'dnsSeverity','dnsRange','dnsRows','dnsEmpty','dnsSecurity','dnsParticipants','dnsDomains',
+'dnsNote','dnsLimits','dnsTabBadge','btnDnsRefresh','btnDnsDisconnect','btnDnsPurge'];
 IDS.forEach(id=>{const e=new El('div',id);registry.set(id,e)});
 
 function httpGet(p){
@@ -52,7 +56,7 @@ function httpGet(p){
 global.document={
   getElementById:id=>registry.get(id)||null,
   querySelectorAll:sel=>{
-    if(sel==='[data-tab]')return ['overview','networks','devices','demo','ipintel','intel','timeline'].map(t=>{
+    if(sel==='[data-tab]')return ['overview','networks','devices','demo','ipintel','dnsintel','intel','timeline'].map(t=>{
       const e=new El('button');e.dataset.tab=t;return e;});
     return [];
   },
@@ -80,7 +84,7 @@ const js=html.match(/<script>\n([\s\S]*)\n<\/script>/)[1];
 eval(js + `
 ;global.__T = { esc, arr, obj, num, refreshLive, refreshHealth, loadRadar, renderIPTable,
   renderIPDetail, renderIPSources, renderIPAlerts, renderRadarSel, renderRogue, renderDiag,
-  refreshAI, refreshPacket, refreshTimeline, refreshIPIntel, refreshIPAlerts, refreshLan,
+  refreshAI, refreshPacket, refreshTimeline, refreshIPIntel, refreshIPAlerts, refreshLan, refreshDns,
   sparkline, sevChip, purposeChip, vendorOf, AI_LABELS, refreshDemo, renderHero, verdictState,
   set radarNets(v){ radarNets=v }, get radarNets(){ return radarNets },
   set ipObserved(v){ ipObserved=v }, get ipObserved(){ return ipObserved },
@@ -182,6 +186,22 @@ function noUndef(html,label){
     const h=document.getElementById('ipAlertList').innerHTML;
     assert(h.length>10,'alert list empty');
     noUndef(h,'ipAlertList');
+  });
+
+  await check('refreshDns renders DNS activity without crashing', async()=>{
+    await T.refreshDns();
+    const stats=document.getElementById('dnsStats').innerHTML;
+    const rows=document.getElementById('dnsRows').innerHTML;
+    assert(stats.length>10,'dns stats empty');
+    assert(rows.length>10,'dns rows empty');
+    assert(document.getElementById('dnsNote').textContent.length>20,'dns note empty');
+    assert(document.getElementById('dnsLimits').innerHTML.length>10,'dns limits empty');
+    assert(document.getElementById('dnsConnectForm').classList.contains('hidden') === false,
+      'local setup form should be visible');
+    assert(document.getElementById('dnsSetupMsg').classList.contains('hidden'),
+      'unconfigured profile should not show a sync-error message');
+    noUndef(stats,'dnsStats'); noUndef(rows,'dnsRows');
+    noUndef(document.getElementById('dnsSetup').innerHTML,'dnsSetup');
   });
 
   await check('refreshTimeline renders chronology', async()=>{

@@ -83,7 +83,12 @@ Every setting is optional and the defaults are the safe ones. Copy `.env.example
 | `CYBERSHIELD_ALLOWED_HOSTS` | `127.0.0.1,localhost,::1` | Extra hostnames/IPs allowed to reach the server (`Host` header check). |
 | `CYBERSHIELD_ALLOWED_ORIGINS` | `http://127.0.0.1:8000,http://localhost:8000` | Extra browser origins allowed to call the API (CORS). |
 | `CYBERSHIELD_TOKEN` | random per start | Fixed session token for state-changing requests. |
-| `CYBERSHIELD_GEO` | `0` | Set to `1` to enable geolocation — the only step that contacts a third party. |
+| `CYBERSHIELD_GEO` | `0` | Set to `1` to enable geolocation — the only IP-intelligence step that contacts a third party. |
+| `NEXTDNS_API_KEY` | unset | Opt-in: read a consented NextDNS profile's query log. Keep it backend-only. |
+| `NEXTDNS_PROFILE_ID` | unset | Opt-in: the NextDNS profile whose logs are ingested. |
+| `NEXTDNS_POLL_SECONDS` | `60` | Background sync interval when a profile is connected (minimum 15). |
+| `DNS_RETENTION_DAYS` | `30` | How long CyberShield keeps its local DNS event copy. |
+| `NEXTDNS_BASE_URL` | `https://api.nextdns.io` | Override only for testing or a compatible self-hosted endpoint. |
 
 ---
 
@@ -251,6 +256,62 @@ Alerts are indicators surfaced for the operator, never autonomous actions. The h
 
 ---
 
+## Network intelligence: consented DNS activity
+
+This is the **only** way to see domain activity from devices other than the machine running CyberShield, and it is deliberately opt-in.
+
+A laptop connected to a phone hotspot is just another client. The hotspot forwards traffic to the internet, so a packet capture on the laptop sees the laptop's own traffic — not the phone's, and not another guest's. CyberShield does not pretend otherwise. Instead, a participant can explicitly configure their device to use a **NextDNS** profile that CyberShield is allowed to read.
+
+### Setup
+
+1. Create a profile at [nextdns.io](https://nextdns.io) and enable query logging. Copy the API key from the account page and the profile ID from the profile's **Setup** page.
+2. Open **DNS Activity** and use **Connect & test**. The backend verifies the credentials with NextDNS before saving them to `~/.cybershield/nextdns.json` with owner-only permissions (mode `0600`). It then starts a background sync every `NEXTDNS_POLL_SECONDS` (default 60).
+
+   The environment-variable path still works and is preferable on a shared or managed host. Add both values to `.env`, export it, and restart the backend:
+
+   ```bash
+   NEXTDNS_API_KEY=your-private-api-key
+   NEXTDNS_PROFILE_ID=your-profile-id
+   ```
+
+   For safety, the setup form accepts credentials only from the machine running CyberShield (loopback). From another device on the same network, set the environment variables on the host instead. The same applies in the Docker demo, where requests arrive through Docker's bridge rather than loopback.
+
+3. On each consenting device, set Private DNS / DNS-over-TLS to:
+
+   ```
+   <device-name>-<profile-id>.dns.nextdns.io
+   ```
+
+   The device name is how the participant appears in the dashboard; use simple letters, digits and hyphens. For example, `Friend-Phone-abc123.dns.nextdns.io` shows up as `Friend-Phone`.
+
+4. Open the **DNS Activity** tab. The dashboard polls every 10 seconds; the backend caches NextDNS responses for 12 seconds and also syncs in the background, so events arrive even when the tab is closed.
+
+Never commit the API key or paste it into a screenshot, chat, or third-party website. The setup form sends it once to the local backend; the key is never returned by an endpoint.
+
+### What appears
+
+| Field | Meaning |
+|---|---|
+| Device | NextDNS device name, or the client name/IP if no name was configured |
+| Domain / root | The name that was looked up |
+| Protocol | DNS transport reported by NextDNS (DoT, DoH, UDP, …) |
+| Status | `default`, `allowed`, or `blocked` |
+| Indicator | `normal`, `watch`, `suspicious`, or `alert`, with the reason |
+
+Indicators are intentionally conservative and transparent: punycode, raw-IP hostnames, long high-entropy labels, unusually deep names, high-abuse TLDs, Tor `.onion` names, and blocklist reasons reported by NextDNS. These are prompts to investigate, not proof of compromise. A blocked lookup is a policy outcome, not automatically an attack.
+
+### History and control
+
+- Events are stored in the local SQLite database for `DNS_RETENTION_DAYS` (default 30) so device timelines and searches survive NextDNS log rollover.
+- **Disconnect profile** removes the stored credentials but keeps local history. **Clear local history** deletes CyberShield's copy and pauses ingestion; press **Refresh** to resume. NextDNS keeps its own copy according to that profile's retention settings.
+- Removing the Private DNS setting on a device stops that device from appearing. Monitoring is visible to participants by design.
+
+### Limits
+
+DNS logging shows **lookups**, not page views. Cached answers produce no new event, and HTTPS content, URLs after the domain, searches, passwords and messages are never visible. VPNs, private DNS resolvers, apps with their own resolver, and background app/analytics traffic all affect coverage. A domain in the table does not prove that someone deliberately opened that website.
+
+---
+
 ## API
 
 All `POST`, `PUT`, `PATCH` and `DELETE` requests need the header `X-CyberShield-Token`. The dashboard fetches it from `GET /api/session` automatically.
@@ -288,6 +349,18 @@ All `POST`, `PUT`, `PATCH` and `DELETE` requests need the header `X-CyberShield-
 - `GET /api/ip/feeds/status` · `POST /api/ip/feeds/refresh`
 - `GET /api/ip/sources` — which enrichers are enabled and what each one sends off-host
 
+**Consented DNS activity**
+
+- `GET /api/network/status` — configured? source, last sync, last error, retention, consent note
+- `POST /api/network/connect` — verify and store credentials; loopback only; body `{"api_key":"…","profile_id":"…"}`
+- `DELETE /api/network/connect` — forget locally stored credentials, keeping history
+- `GET /api/network/overview?hours=24&limit=100&device=…&q=…&severity=flagged` — stats, participants, top domains and events
+- `GET /api/network/events` — the same event query without the dashboard aggregates
+- `GET /api/network/devices` · `/api/network/device/{name}` — participant summaries and timeline
+- `GET /api/network/domains` — most-requested domains
+- `POST /api/network/refresh` — force a NextDNS fetch (also resumes ingestion after a purge)
+- `DELETE /api/network/history` — clear the local copy and pause ingestion
+
 ---
 
 ## Security and privacy
@@ -298,8 +371,11 @@ All `POST`, `PUT`, `PATCH` and `DELETE` requests need the header `X-CyberShield-
 - **State-changing endpoints need a per-session token.** Without it, any web page you visit while the dashboard is running could turn off your Wi-Fi, delete a saved network, or start a packet capture. The dashboard fetches the token from `GET /api/session`, which other origins cannot read.
 - **Packet capture is headers only, never payloads.** Snap length is 128 bytes: link, network and transport headers, with payloads truncated at capture time. Captures are size-, time- and packet-bounded, kept in the OS temp directory, and deleted automatically after 15 minutes.
 - **No packet payload is ever read, stored or sent** by any part of this tool. Flow telemetry comes from socket and interface counters.
-- **Geolocation is off by default**, and it is the only feature that sends an observed address to a third party. The dashboard states which enrichers are active.
+- **Geolocation is off by default**, and it is the only IP-intelligence feature that sends an observed address to a third party. The dashboard states which enrichers are active.
 - **Reputation matching is local.** Lists are downloaded one-way and matched on your machine; raw observed addresses are never sent to a reputation API.
+- **Local credentials are still local secrets.** The `0600` file protects against other OS users, not against malware or any process running as your account. Prefer environment variables or a secret manager on a shared host.
+- **Local DNS history is sensitive and sits in the same unencrypted SQLite file as the rest of the app.** Use full-disk encryption on a laptop, and remember that anyone who can read that file can see the domains that were looked up.
+- **DNS activity is opt-in and consent-based.** It works only for devices whose owners explicitly configured the CyberShield NextDNS profile. The API key is read from the environment or a `0600` local config, never returned by an endpoint, and never included in a status response. The credential form is loopback-only; a visible control disconnects the profile, and another clears the local copy and pauses ingestion. NextDNS still sees the DNS queries it resolves — that is inherent to using it as a resolver.
 
 ---
 
@@ -308,7 +384,7 @@ All `POST`, `PUT`, `PATCH` and `DELETE` requests need the header `X-CyberShield-
 **Limitations**
 
 - Live mode is exercised on macOS; Windows and Linux collectors exist and follow the same shape, but the macOS path is the most tested.
-- This is a prototype, not a replacement for a firewall or IDS. It observes one host. It cannot see other machines' traffic.
+- This is a prototype, not a replacement for a firewall or IDS. The live host collectors observe one machine; the separate opt-in DNS feature only sees devices that use the configured NextDNS profile.
 - Risk scores are heuristics. A high score means "look at this", not "this is an attack".
 - The Isolation Forest is trained on small synthetic samples, not on your environment. Treat its output as corroboration, never as ground truth.
 - Blocking prevents future auto-joins. It does not drop the current session and does not affect other devices.
@@ -318,13 +394,14 @@ All `POST`, `PUT`, `PATCH` and `DELETE` requests need the header `X-CyberShield-
 - LAN sweeps see only hosts that answer ARP or ping.
 - Twin detection compares security and channel fingerprints, not BSSIDs, so a perfect clone is not distinguishable from the legitimate AP by these signals alone.
 - IP purpose classification is heuristic: a hosting provider that also runs a CDN is classified as a CDN, and an address matching no rule stays `unknown` rather than being guessed.
+- **DNS Activity cannot see another device unless that device uses the configured NextDNS profile.** A hotspot host cannot silently observe guests' browsing. VPNs, private resolvers, apps with their own DNS, cached answers and background traffic all reduce coverage. DNS logs show lookups, not page views; HTTPS content is never visible. Indicators are heuristics, not proof of compromise. Clearing local history does not delete NextDNS's own copy. Background sync runs only while the backend is running, a profile is connected, and ingestion is not paused.
 
 **Privacy**
 
 - **Headers only, never payloads.** The PCAP path truncates at 128 bytes at capture time.
 - Collectors read: Wi-Fi link and scan results, IP/gateway/DNS, ARP table, interface and socket counters, and the names of local processes. Nothing else.
 - The socket table is used to attribute a connection to a local program. Only the program *name* is read — no arguments, no file contents.
-- Addresses, ports, hostnames and organisation names are stored in a local SQLite file. Nothing is uploaded anywhere.
+- Addresses, ports, hostnames and organisation names are stored in a local SQLite file. IP telemetry is never uploaded. The opt-in DNS feature downloads logs from NextDNS; it does not upload packet data or browsing content. If you connect a profile in the dashboard, the API key is stored locally at `~/.cybershield/nextdns.json` with owner-only permissions; it is sent only to NextDNS.
 - Local program attribution needs `lsof` on macOS and Linux (`brew install lsof` / `sudo apt install lsof`). Without it, connections show as `unknown`.
 
 ---
@@ -332,9 +409,9 @@ All `POST`, `PUT`, `PATCH` and `DELETE` requests need the header `X-CyberShield-
 ## Project layout
 
 ```
-backend/          FastAPI app, risk engine, live Wi-Fi checks, IP intelligence
+backend/          FastAPI app, risk engine, live Wi-Fi checks, IP intelligence, DNS activity
 frontend/         Single-page dashboard (Tailwind via CDN, no build step)
-tests/            unittest suite for the risk, scoring, IP and security layers
+tests/            unittest suite for the risk, scoring, IP, DNS and security layers
 tools/            Screenshot and GIF capture helpers (Swift + Python)
 docs/             Screenshots and the attack demo GIF
 run.sh            Start script (macOS, Linux)
@@ -362,6 +439,7 @@ Tests also run in CI on every push, across Linux, macOS and Windows.
 - [x] Sparklines for signal, loss and latency
 - [x] Search, sort and filter on tables
 - [x] IP Purpose Intelligence (reverse DNS, ASN/ISP via Team Cymru, purpose labels, alerts, reports)
+- [x] Consented network-wide DNS activity via NextDNS (device mapping, indicators, local retention, purge/pause)
 - [x] Device vendor lookup from the MAC address
 - [x] Export reports as Markdown, JSON or CSV
 - [x] Docker setup for the simulated demo mode
